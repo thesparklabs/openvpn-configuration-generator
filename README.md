@@ -9,11 +9,14 @@ client configurations for an OpenVPN server easier.
 
 ## Usage
 To get started, create a new directory, cd into it and run the following then follow the prompts:
+
 `openvpn-generate init`
 
 To create a client, cd into the directory where you ran init, run the following and follow the prompts:
+
 `openvpn-generate client`
 
+```
 Usage: openvpn-generate init
 Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
@@ -24,6 +27,7 @@ Usage: openvpn-generate  generate-client
 Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --name NAME     Prefill Common Name
+```
 
 ## Installation
 
