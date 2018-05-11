@@ -1,5 +1,5 @@
 # OpenVPN Configuration Generator
-### Developed by SparkLabs Pty Ltd (support@sparklabs.com)
+### Developed by SparkLabs Pty Ltd (https://www.sparklabs.com)
 ### Check Releases tab to download
 
 
