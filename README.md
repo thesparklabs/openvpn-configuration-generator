@@ -1,6 +1,6 @@
 # OpenVPN Configuration Generator
 ### Developed by SparkLabs Pty Ltd (https://www.sparklabs.com)
-### Check Releases tab to download
+### [Download Here](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest)
 
 
 ## Overview
@@ -25,7 +25,7 @@ Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --name NAME     Prefill Common Name
 
-## Instalation
+## Installation
 
 ### Ubuntu
 `sudo dpkg -i openvpn-configuration-generator_1.0-1.deb`
