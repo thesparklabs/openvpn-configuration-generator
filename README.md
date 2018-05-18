@@ -38,4 +38,4 @@ Optional:
 Coming soon
 
 ### Windows
-Coming soon
+Download and run the MSI installer. The install location is added to the system path by default for easy use and installs all prerequisites automatically.
