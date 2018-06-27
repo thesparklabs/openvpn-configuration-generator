@@ -23,7 +23,7 @@ Optional:
   --keysize size  Change Keysize (2048 default)
   --days days     Days certificates are valid (3650 default)
 
-Usage: openvpn-generate  generate-client
+Usage: openvpn-generate client
 Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --name NAME     Prefill Common Name
@@ -31,11 +31,11 @@ Optional:
 
 ## Installation
 
+### macOS
+Extract the tar.gz archive and run
+
 ### Ubuntu
 `sudo dpkg -i openvpn-configuration-generator_1.0-1.deb`
-
-### macOS
-Coming soon
 
 ### Windows
 Download and run the MSI installer. The install location is added to the system path by default for easy use and installs all prerequisites automatically.
