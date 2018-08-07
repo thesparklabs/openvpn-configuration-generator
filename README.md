@@ -22,15 +22,23 @@ To create a client, cd into the directory where you ran init, run the following 
 
 ```
 Usage: openvpn-generate init
+Initialise configuration, creates server configuration
 Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --keysize size  Change Keysize (2048 default)
   --days days     Days certificates are valid (3650 default)
 
 Usage: openvpn-generate client
+Creates client configurations
 Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --name NAME     Prefill Common Name
+
+Usage: openvpn-generate --help
+Displays this information
+
+Usage: openvpn-generate --about
+Displays information about this tool
 ```
 
 ## Installation
