@@ -1,11 +1,15 @@
 # OpenVPN Configuration Generator
-### Developed by SparkLabs Pty Ltd (https://www.sparklabs.com)
-### [Download Here](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest)
 
+Developed by [SparkLabs](https://www.sparklabs.com)
+
+Further documentation and tutorials [can be found here](https://www.sparklabs.com/support/kb/article/creating-certificates-and-keys-for-your-openvpn-server/).
 
 ## Overview
 The OpenVPN Configuration Generator is designed to make generating server and 
 client configurations for an OpenVPN server easier.
+
+## Download
+Releases for macOS, Windows, and Linux can be [downloaded here](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest).
 
 ## Usage
 To get started, create a new directory, cd into it and run the following then follow the prompts:
