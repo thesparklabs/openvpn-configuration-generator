@@ -1,0 +1,739 @@
+// Copyright SparkLabs Pty Ltd 2018
+
+#include "stdafx.h"
+#include "Interactive.h"
+
+Interactive::Interactive(String ^ path, int keySize, int validDays)
+{
+	this->path = path;
+	this->keySize = keySize;
+	this->validDays = validDays;
+
+	//Init other paths
+	this->configPath = Path::Combine(path, "config.conf");
+	this->pkiPath = Path::Combine(path, "pki");
+	this->caPath = Path::Combine(this->pkiPath, "ca.crt");
+	this->keyPath = Path::Combine(this->pkiPath, "ca.key");
+	this->clientsPath = Path::Combine(path, "clients");
+}
+
+bool Interactive::LoadConfig()
+{
+	if (!File::Exists(this->configPath)) {
+		return false;
+	}
+
+	Dictionary<String^, Object^>^ dict;
+	try {
+		StreamReader^ sr = gcnew StreamReader(this->configPath);
+		String^ json = sr->ReadToEnd();
+		sr->Close();
+
+		//Turn into dict
+		dict = JsonConvert::DeserializeObject<Dictionary<String^, Object^>^>(json);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to load config at {0}. {1}", this->configPath, e->Message);
+		return false;
+	}
+
+	//Load in object
+	if ((this->cSubject = CertificateSubject::fromDict(dict)) == nullptr) {
+		Console::WriteLine("ERROR: Failed to load subject from config");
+		return false;
+	}
+	this->config = dict;
+
+	//Load in fixed defaults
+	Object^ val;
+	if (dict->TryGetValue("keysize", val)) {
+		this->keySize = Convert::ToInt32(val);		
+	}
+	if (dict->TryGetValue("validdays", val)) {
+		this->validDays = Convert::ToInt32(val);
+	}
+	if (dict->TryGetValue("serial", val)) {
+		this->_serial = Convert::ToInt32(val);
+	}
+
+	//Load in CA
+	String^ certData;
+	try {
+		StreamReader^ sr = gcnew StreamReader(this->caPath);
+		certData = sr->ReadToEnd();
+		sr->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to read cert off disk.");
+		return false;
+	}
+	String^ keyData;
+	try {
+		StreamReader^ sr = gcnew StreamReader(this->keyPath);
+		keyData = sr->ReadToEnd();
+		sr->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to read key off disk.");
+		return false;
+	}
+
+	try {
+		this->Issuer = OpenSSLHelper::LoadIdentity(certData, keyData);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to load issuer identity. {0}", e->Message);
+		return false;
+	}
+	if (this->Issuer == nullptr) {
+		Console::WriteLine("ERROR: Failed to load issuer identity, empty value.");
+		return false;
+	}
+
+	return true;
+}
+
+bool Interactive::SaveConfig()
+{
+	this->config["serial"] = this->_serial;
+	try {
+		//Convert to JSON
+		String^ json = JsonConvert::SerializeObject(this->config);
+
+		//Write to config
+		StreamWriter^ sw = gcnew StreamWriter(this->configPath);
+		sw->Write(json);
+		sw->Flush();
+		sw->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to write config to {0}. {1}", this->configPath, e->Message);
+		return false;
+	}
+
+	return true;
+}
+
+bool Interactive::CreateNewIssuer()
+{
+	if (cSubject == nullptr) {
+		Console::WriteLine("ERROR: No Subject available.");
+		return false;
+	}
+	Identity^ identity;
+	try {
+		identity = OpenSSLHelper::CreateCAAndKey(cSubject, this->keySize, this->validDays, this->Serial);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to create CA. {0}", e->Message);
+		return false;
+	}
+	this->Issuer = identity;
+	return this->saveIdentity(identity, "ca");
+}
+
+bool Interactive::CreateDH()
+{
+	Console::WriteLine("Creating DH Params. This will take a while...");
+	try {
+		String^ dhPem = OpenSSLHelper::CreateDH(this->keySize);
+
+		//Save to disk
+		String^ dhPath = Path::Combine(this->pkiPath, "dh.pem");
+		StreamWriter^ sw = gcnew StreamWriter(dhPath);
+		sw->Write(dhPem);
+		sw->Flush();
+		sw->Close();
+		Console::WriteLine(); //Write blank line to gap the dots
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to generate DH params. {0}", e->Message);
+		return false;
+	}
+	return true;
+}
+
+bool Interactive::CreateServerConfig()
+{
+	String^ certpath = Path::Combine(this->pkiPath, "server.crt");
+	String^ keypath = Path::Combine(this->pkiPath, "server.key");
+	String^ dhPath = Path::Combine(this->pkiPath, "dh.pem");
+
+	if (!File::Exists(this->caPath)) {
+		Console::WriteLine("ERROR: Missing CA. Please regenerate config");
+		return false;
+	}
+	if (!File::Exists(dhPath)) {
+		Console::WriteLine("ERROR: Missing DH. Please regenerate config");
+		return false;
+	}
+
+	String^ port;
+	String^ proto;
+	try {
+		port = (String^)this->config["port"];
+		proto = (String^)this->config["proto"];
+	}
+	catch (Exception ^ e) {
+		Console::WriteLine("ERROR: Invalid config. Please regenerate config");
+		return false;
+	}
+
+	if (!this->createNewServerIdentity()) {
+		Console::WriteLine("ERROR: Failed to generate server identity.");
+		return false;
+	}
+	if (!File::Exists(certpath)) {
+		Console::WriteLine("ERROR: Missing Cert. Please regenerate config");
+		return false;
+	}
+	if (!File::Exists(keypath)) {
+		Console::WriteLine("ERROR: Missing Key. Please regenerate config");
+		return false;
+	}
+
+	String^ file = "#-- Config Auto Generated by SparkLabs OpenVPN Certificate Generator --#\n";
+	file += "#--                   Config for OpenVPN 2.4 Server                  --#\n\n";
+	file += "dh dh.crt\n";
+	file += "proto {0}\n";
+	file += "ifconfig-pool-persist ipp.txt\n";
+	file += "keepalive 10 120\n";
+	file += "compress\n";
+	file += "user nobody\ngroup nogroup\n";
+	file += "persist-key\npersist-tun\n";
+	file += "status openvpn-status.log\n";
+	file += "verb 3\n";
+	file += "mute 10\n";
+	file += "ca ca.crt\ncert server.crt\nkey server.key\n";
+	file += "port {1}\n";
+	file += "dev tun0\n";
+	file += "server 10.8.0.0 255.255.255.0\n";
+
+	try {
+		List<String^>^ dns = (List<String^>^)config["dns"];
+		if (dns != nullptr && dns->Count > 0) {
+			for each (String^ var in dns)
+			{
+				file += String::Format("push \"dhcp-option DNS {0}\"\n", var);
+			}
+		}
+	} catch (Exception^) {}
+
+	try {
+		if ((bool)this->config["redirect"]) {
+			file += "push \"redirect-gateway def1\"\n";
+		}
+	} catch (Exception^){}
+
+	file += "#Uncomment the below to allow client to client communication\n#client-to-client\n";
+	file += "#Uncomment the below and modify the command to allow access to your internal network\n#push \"route 192.168.0.0 255.255.255.0\"\n";
+
+	file = String::Format(file, proto, port);
+
+	//Make a new directory for the server
+	String^ serverPath = Path::Combine(this->path, "server");
+	try {
+		if (Directory::Exists(serverPath)) {
+			Directory::Delete(serverPath, true);
+		}
+		Directory::CreateDirectory(serverPath);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to make directory for server configuration. {0}", e->Message);
+		return false;
+	}
+
+	//Write config
+	try {
+		StreamWriter^ sw = gcnew StreamWriter(Path::Combine(serverPath, "server.conf"));
+		sw->Write(file);
+		sw->Flush();
+		sw->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to write server config. {0}", e->Message);
+		return false;
+	}
+	//Copy Files
+	try {
+		File::Copy(this->caPath, Path::Combine(serverPath, "ca.crt"));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy CA. {0}", e->Message);
+		return false;
+	}
+	try {
+		File::Copy(certpath, Path::Combine(serverPath, "server.crt"));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy Cert. {0}", e->Message);
+		return false;
+	}
+	try {
+		File::Copy(dhPath, Path::Combine(serverPath, "dh.crt"));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy DH. {0}", e->Message);
+		return false;
+	}
+	try {
+		File::Copy(keypath, Path::Combine(serverPath, "server.key"));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy Key. {0}", e->Message);
+		return false;
+	}
+	Console::WriteLine("Successfully generated server configuration at {0}.", serverPath);
+	return true;
+}
+
+bool Interactive::CreateNewClientConfig(String ^ name)
+{
+	if (cSubject == nullptr) {
+		Console::WriteLine("ERROR: No subject available.");
+		return false;
+	}
+	if (!File::Exists(this->caPath)) {
+		Console::WriteLine("ERROR: Missing CA. Please regenerate config.");
+		return false;
+	}
+
+	String^ address;
+	String^ port;
+	String^ proto;
+	try {
+		address = (String^)this->config["server"];
+		port = (String^)this->config["port"];
+		proto = (String^)this->config["proto"];
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Invalid config. Please regenerate config.");
+		return false;
+	}
+
+	//Try and make dir for all clients if not exists
+	try {
+		if (!Directory::Exists(this->clientsPath)) {
+			Directory::CreateDirectory(this->clientsPath);
+		}
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to make clients directory. {0}", e->Message);
+		return false;
+	}
+
+	String^ CN;
+	if (!String::IsNullOrWhiteSpace(name)) {
+		CN = name;
+	}
+	else {
+		String^ input = askQuestion("Common Name. This should be unique, for example a username [client1]:", false);
+		if (String::IsNullOrWhiteSpace(input)) {
+			CN = "client1";
+		}
+		else {
+			CN = input;
+		}
+	}
+	String^ clientPath = Path::Combine(this->path, CN);
+	try {
+		if (Directory::Exists(clientPath)) {
+			Directory::Delete(clientPath, true);
+		}
+		Directory::CreateDirectory(clientPath);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to make directory for server configuration. {0}", e->Message);
+		return false;
+	}
+
+	if (!createNewClientIdentity(CN))
+		return false;
+	
+	//Copy files
+	String^ cert = String::Format("{0}.crt", CN);
+	String^ key = String::Format("{0}.key", CN);
+	try {
+		File::Copy(this->caPath, Path::Combine(clientPath, "ca.crt"));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy CA. {0}", e->Message);
+		return false;
+	}
+	try {
+		File::Copy(Path::Combine(pkiPath, cert), Path::Combine(clientPath, cert));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy Cert. {0}", e->Message);
+		return false;
+	}
+	try {
+		File::Copy(Path::Combine(pkiPath, key), Path::Combine(clientPath, key));
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy Key. {0}", e->Message);
+		return false;
+	}
+
+	//Create config
+	String^ file = "#-- Config Auto Generated By SparkLabs OpenVPN Certificate Generator--#\n\n";
+	file += "#viscosity name {0}@{1}\n";
+	file += "remote {1} {2} {3}\n";
+	file += "dev tun\ntls-client\n";
+	//Certs
+	file += "ca ca.crt\n";
+	file += "cert {0}.crt\n";
+	file += "key {0}.key\n";
+	file += "persist-tun\npersist-key\ncompress\nnobind\npull\nroute-delay 5\n";
+
+	file = String::Format(file, CN, address, port, proto);
+
+	//Write config
+	try {
+		StreamWriter^ sw = gcnew StreamWriter(Path::Combine(clientPath, "config.conf"));
+		sw->Write(file);
+		sw->Flush();
+		sw->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to write client config. {0}", e->Message);
+		return false;
+	}
+
+	//Create visc
+	this->createVisz(CN, clientPath);
+
+	//remove config
+	try {
+		if (Directory::Exists(clientPath)) {
+			Directory::Delete(clientPath, true);
+		}
+	}
+	catch (Exception^) {
+		//Do nothing
+	}
+
+	return true;
+}
+
+String ^ Interactive::askQuestion(String ^ question, bool allowedBlank, bool hasDefault)
+{
+	while (true) {
+		Console::Write(question + " ");
+		String^ input = Console::ReadLine();
+		if (String::IsNullOrWhiteSpace(input) && !hasDefault) {
+			Console::WriteLine("This field cannot be left blank.");
+			continue;
+		}
+		if (input == "." && !allowedBlank) {
+			Console::WriteLine("This field cannot be left blank.");
+			continue;
+		}
+		return input;
+	}
+}
+String ^ Interactive::askQuestion(String ^ question, bool allowedBlank) {
+	return askQuestion(question, allowedBlank, true);
+}
+
+bool Interactive::saveIdentity(Identity^ identity, String^ name)
+{
+	//Create PKI dir
+	try {
+		if (!Directory::Exists(this->pkiPath))
+			Directory::CreateDirectory(this->pkiPath);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to create PKI dir. {0}", e->Message);
+	}
+
+	String^ certpath = Path::Combine(this->pkiPath, name + ".crt");
+	String^ keypath = Path::Combine(this->pkiPath, name + ".key");
+
+	String^ cert = OpenSSLHelper::CertAsPEM(identity->cert);
+	if (cert == nullptr) {
+		Console::WriteLine("ERROR: Failed to create certificate");
+		return false;
+	}
+	try {
+		StreamWriter^ sw = gcnew StreamWriter(certpath);
+		sw->Write(cert);
+		sw->Flush();
+		sw->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to write certificate to disk. {0}", e->Message);
+	}
+
+	String^ key = OpenSSLHelper::KeyAsPEM(identity->key);
+	if (key == nullptr) {
+		Console::WriteLine("ERROR: Failed to create key");
+		return false;
+	}
+	try {
+		StreamWriter^ sw = gcnew StreamWriter(keypath);
+		sw->Write(key);
+		sw->Flush();
+		sw->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to write key to disk. {0}", e->Message);
+	}
+
+	return true;
+}
+
+bool Interactive::createNewClientIdentity(String ^ name)
+{
+	if (!verifyRequirements())
+		return false;
+	CertificateSubject^ subject = this->cSubject;
+	subject->CommonName = name;
+	Identity^ identity;
+	try {
+		identity = OpenSSLHelper::CreateCertKeyBundle(subject, this->Issuer, this->keySize, this->validDays, this->Serial, false);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("Failed to create server identity. {0}", e->Message);
+		return false;
+	}
+	return saveIdentity(identity, name);
+}
+
+bool Interactive::createNewServerIdentity()
+{
+	if (!verifyRequirements())
+		return false;
+	CertificateSubject^ subject = this->cSubject;
+	subject->CommonName = "server";
+	Identity^ identity;
+	try {
+		identity = OpenSSLHelper::CreateCertKeyBundle(subject, this->Issuer, this->keySize, this->validDays, this->Serial, true);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("Failed to create server identity. {0}", e->Message);
+		return false;
+	}
+	return saveIdentity(identity, "server");
+}
+
+bool Interactive::createVisz(String^ fileName, String ^ folder)
+{
+	String^ visz = Path::Combine(this->clientsPath, String::Format("{0}.visz", fileName));
+	Stream^ outStream = File::Create(visz);
+	Stream^ gzoStream = gcnew GZipOutputStream(outStream);
+	TarArchive^ tarArchive = TarArchive::CreateOutputTarArchive(gzoStream);
+
+	String^ rootPath = Directory::GetParent(folder)->ToString();
+	tarArchive->RootPath = rootPath->Replace('\\', '/');
+	if (tarArchive->RootPath->EndsWith("/")) {
+		tarArchive->RootPath = tarArchive->RootPath->Remove(tarArchive->RootPath->Length);
+	}
+
+	//Add files
+	TarEntry^ entry = TarEntry::CreateEntryFromFile(folder);
+	tarArchive->WriteEntry(entry, true);
+	tarArchive->Close();
+	return true;
+}
+
+bool Interactive::verifyRequirements()
+{
+	Console::WriteLine("Creating Server Identity...");
+	if (this->Issuer == nullptr) {
+		Console::WriteLine("ERROR: No issuer available.");
+		return false;
+	}
+	if (this->cSubject == nullptr) {
+		Console::WriteLine("ERROR: No subject available.");
+		return false;
+	}
+	return true;
+}
+
+bool Interactive::GenerateNewConfig()
+{
+	//First check a config doesn't already exist here
+	if (LoadConfig()) {
+		Console::WriteLine("ERROR: Config already exists, please choose a different directory");
+		return false;
+	}
+	Console::WriteLine("Please fill in the information below that will be incorporated into your certificate.");
+	Console::WriteLine("Some fields have a default value in square brackets, simply press Enter to use these values without entering anything.");
+	Console::WriteLine("Some fields can be left blank if desired. Enter a '.' only for a field to be left blank.");
+	Console::WriteLine("---");
+
+	String^ address = askQuestion("Server address, e.g. myserver.mydomain.com:", false, false);
+
+	String^ port;
+	while (true) {
+		String^ input = askQuestion(String::Format("Server Port [{0}]:", defaultPort), false);
+		if (input == String::Empty) {
+			port = defaultPort;
+			break;
+		}
+		//Check
+		int test;
+		if (int::TryParse(input, test) && test > 0 && test < 65535) {
+			port = input;
+			break;
+		}
+		else {
+			Console::WriteLine("Invalid input, try again.");
+		}
+	}
+
+	String^ proto;
+	while (true) {
+		String^ input = askQuestion(String::Format("Protocol, 1=UDP, 2=TCP [{0}]:", defaultProtocol), false);
+		if (input == String::Empty) {
+			proto = defaultProtocol->ToLower();
+			break;
+		}
+		if (input == "1") {
+			proto = "udp";
+			break;
+		}
+		else if (input == "2") {
+			proto = "tcp";
+			break;
+		}
+		Console::WriteLine("Invalid input, try again");
+	}
+
+	List<String^>^ dns = gcnew List<String^>();
+	while (true) {
+		String^ input = askQuestion(String::Format("DNS Servers, comma separated for multiple [{0}]:", defaultDNS), true);
+		if (String::IsNullOrEmpty(input)) {
+			dns = gcnew List<String^>(1);
+			dns->Add(defaultDNS);
+			break;
+		}
+		if (input == ".") {
+			dns = gcnew List<String^>(0);
+			break;
+		}
+		//Try and split whatever input was given
+		dns->Clear();
+		array<String^>^ vals = input->Split(gcnew array<String^>{ "," }, StringSplitOptions::RemoveEmptyEntries);
+		System::Net::IPAddress^ discard;
+		bool valid = true;
+		for each (String^ var in vals)
+		{
+			String^ tmp = var->Trim();
+			if (System::Net::IPAddress::TryParse(tmp, discard)) {
+				dns->Add(tmp);
+			}
+			else {
+				Console::WriteLine(tmp + " is not a valid IP Address.");
+				valid = false;
+				break;
+			}
+		}
+		if (valid)
+			break;
+	}
+
+	bool redirectTraffic = true;
+	while (true) {
+		String^ input = askQuestion("Redirect all traffic through VPN? [Y/n]:", false)->ToLower();
+		if (input == String::Empty || input == "y") {
+			break;
+		}
+		else if (input == "n") {
+			redirectTraffic = false;
+			break;
+		}
+		Console::WriteLine("Invalid input, try again.");
+	}
+	bool useDefaults = true;
+	while (true) {
+		String^ input = askQuestion("Would you like to use anonymous defaults for certificate details? [Y/n]:", false)->ToLower();
+		if (input == String::Empty || input == "y") {
+			break;
+		}
+		else if (input == "n") {
+			useDefaults = false;
+			break;
+		}
+		Console::WriteLine("Invalid input, try again.");
+	}
+	CertificateSubject^ cs;
+	String^ input;
+	if (useDefaults) {
+		cs = gcnew CertificateSubject(address);
+		goto SAVEDETAILS;
+	}
+
+	input = askQuestion(String::Format("Common Name, e.g. your servers name [{0}]:", address), false);
+	if (input == String::Empty) {
+		input = address;
+	}
+
+	cs = gcnew CertificateSubject(input);
+		
+	input = askQuestion(String::Format("Country Name, 2 letter ISO code [{0}]:", defaultCountry), true);
+	if (input == String::Empty) {
+		input = defaultCountry;
+	}
+	if (input != ".") {
+		cs->Country = input;
+	}
+
+	input = askQuestion(String::Format("State or Province [{0}]:", defaultState), true);
+	if (input == String::Empty) {
+		input = defaultState;
+	}
+	if (input != ".") {
+		cs->State = input;
+	}
+
+	input = askQuestion(String::Format("Locality Name, e.g. a City [{0}]:", defaultLocale), true);
+	if (input == String::Empty) {
+		input = defaultLocale;
+	}
+	if (input != ".") {
+		cs->Location = input;
+	}
+
+	input = askQuestion(String::Format("Organisation Name [{0}]:", defaultON), true);
+	if (input == String::Empty) {
+		input = defaultON;
+	}
+	if (input != ".") {
+		cs->Organisation = input;
+	}
+
+	input = askQuestion(String::Format("Organisation Unit, e.g. department [{0}]:", defaultOU), true);
+	if (input == String::Empty) {
+		input = defaultOU;
+	}
+	if (input != ".") {
+		cs->OrganisationUnit = input;
+	}
+
+	input = askQuestion(String::Format("Email Address [{0}]:", defaultEmail), true);
+	if (input == String::Empty) {
+		input = defaultEmail;
+	}
+	if (input != ".") {
+		cs->Email = input;
+	}
+
+	SAVEDETAILS:
+
+	Dictionary<String^, Object^>^ config = cs->toDict();
+	config->Add("proto", proto);
+	config->Add("port", port);
+	//config->Add("dns", dns);
+	config->Add("server", address);
+	config->Add("redirect", redirectTraffic);
+	config->Add("keysize", this->keySize);
+	config->Add("validdays", this->validDays);
+	config->Add("dns", dns);
+
+	this->config = config;
+	this->cSubject = cs;
+
+	return this->SaveConfig();
+}
