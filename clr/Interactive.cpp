@@ -173,6 +173,12 @@ bool Interactive::CreateServerConfig()
 	try {
 		port = (String^)this->config["port"];
 		proto = (String^)this->config["proto"];
+		if (proto == "tcp") {
+			proto = "tcp-server";
+		}
+		else {
+			proto = "udp";
+		}
 	}
 	catch (Exception ^ e) {
 		Console::WriteLine("ERROR: Invalid config. Please regenerate config");
@@ -305,6 +311,12 @@ bool Interactive::CreateNewClientConfig(String ^ name)
 		address = (String^)this->config["server"];
 		port = (String^)this->config["port"];
 		proto = (String^)this->config["proto"];
+		if (proto == "tcp") {
+			proto = "tcp-client";
+		}
+		else {
+			proto = "udp";
+		}
 	}
 	catch (Exception^ e) {
 		Console::WriteLine("ERROR: Invalid config. Please regenerate config.");

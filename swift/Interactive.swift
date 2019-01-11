@@ -242,10 +242,15 @@ class Interactive {
         }
         guard let _ = config["server"] as? String,
             let port = config["port"] as? String,
-            let proto = config["proto"] as? String
+            var proto = config["proto"] as? String
         else {
             print("ERROR: Invalid config. Please regenerate config")
             return false;
+        }
+        if proto == "tcp" || proto == "tcp-client" { // tcp-client for legacy support
+            proto = "tcp-server"
+        } else {
+            proto = "udp"
         }
         //Generate Identity
         guard createNewServerIdentity() else {
@@ -367,10 +372,15 @@ class Interactive {
         }
         guard let address = config["server"] as? String,
             let port = config["port"] as? String,
-            let proto = config["proto"] as? String
+            var proto = config["proto"] as? String
         else {
             print("ERROR: Invalid config. Please regenerate config")
             return false;
+        }
+        if proto == "tcp" || proto == "tcp-client" { // tcp-client for legacy support
+            proto = "tcp-client"
+        } else {
+            proto = "udp"
         }
         //Try and make dir for all clients if not exists
         do {
@@ -504,7 +514,7 @@ class Interactive {
                         proto = "udp"
                         break
                     } else if value == 2 {
-                        proto = "tcp-client"
+                        proto = "tcp"
                         break
                     } else {
                         print ("Invalid input, try again.")
