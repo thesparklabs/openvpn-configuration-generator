@@ -271,7 +271,6 @@ class Interactive {
         file += "proto \(proto)\n"
         file += "ifconfig-pool-persist ipp.txt\n"
         file += "keepalive 10 120\n"
-        file += "compress\n"
         file += "user nobody\ngroup nogroup\n"
         file += "persist-key\npersist-tun\n"
         file += "status openvpn-status.log\n"
@@ -446,7 +445,7 @@ class Interactive {
         file += "ca ca.crt\n"
         file += "cert \(CN).crt\n"
         file += "key \(CN).key\n"
-        file += "persist-tun\npersist-key\ncompress\nnobind\npull\nroute-delay 5\n"
+        file += "persist-tun\npersist-key\nnobind\npull\n"
         //Write config
         do {
             try file.write(to: clientPath.appendingPathComponent("config.conf"), atomically:true, encoding: .utf8)
