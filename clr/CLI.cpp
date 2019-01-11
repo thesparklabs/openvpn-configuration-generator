@@ -71,6 +71,8 @@ void CLI::printAbout()
 	String^ name = System::Reflection::Assembly::GetEntryAssembly()->GetName()->Name;
 	Console::WriteLine("");
 	Console::WriteLine(String::Format("{0} Tool", name));
+	Console::WriteLine("Using " + OpenSSLHelper::OpenSSLVersion());
+	Console::WriteLine("");
 	Console::WriteLine("Copyright SparkLabs Pty Ltd 2018");
 	Console::WriteLine("Licensed under Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0)");
 	Console::WriteLine("Portions of the code included in or with this tool may container, or may be derived from, third-party code, including without limitation, open source software. All use of third-party software is subject to and governed by the respective licenses for the third-party software. These licenses are available at https://github.com/thesparklabs/openvpn-configuration-generator/blob/master/LICENSE");

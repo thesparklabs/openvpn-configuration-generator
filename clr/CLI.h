@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "OpenSSLHelper.h"
+
 using namespace System;
 using namespace System::Collections::Generic;
 

@@ -1,6 +1,7 @@
 // Copyright SparkLabs Pty Ltd 2018
 
 import Foundation
+import SparkLabsCore
 
 class CLI {
     class func printUsage() {
@@ -27,7 +28,9 @@ class CLI {
     class func printAbout() {
         let exename = URL(fileURLWithPath: CommandLine.arguments[0] as String).deletingPathExtension().lastPathComponent
         print("\(exename) Tool")
-	    print("Copyright SparkLabs Pty Ltd 2018");
+        print("Using \(Utilities.OpenSSLVersion())")
+        print()
+	    print("Copyright SparkLabs Pty Ltd 2019");
 	    print("Licensed under Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0)");
 	    print("Portions of the code included in or with this tool may container, or may be derived from, third-party code, including without limitation, open source software. All use of third-party software is subject to and governed by the respective licenses for the third-party software. These licenses are available at https://github.com/thesparklabs/openvpn-configuration-generator/blob/master/LICENSE");
     }
