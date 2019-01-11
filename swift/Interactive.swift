@@ -13,8 +13,12 @@ class Interactive {
     var defaultEmail = "me@host.domain"
 
     var defaultProtocol = "UDP"
-    var defaultDNS = "10.8.0.1"
     var defaultPort = "1194"
+
+    var cloudflareDNS = ["1.1.1.1", "1.0.0.1"]
+    var googleDNS = ["8.8.8.8", "8.8.4.4"]
+    var openDNS = ["208.67.222.222", "208.67.220.220"]
+    var localDNS = "10.8.0.1"
 
     let path:URL
     let configPath:URL
@@ -526,31 +530,6 @@ class Interactive {
                 break
             }
         }
-        var dns:[String] = []
-        while true {
-            if let input = askQuestion("DNS Servers, comma separated for multiple [\(defaultDNS)]:") {
-                //Validate
-                var finalVal:[String] = []
-                let vals = input.components(separatedBy: ",")
-                var valid = true
-                for v in vals {
-                    let val = v.trim()
-                    if IPAddress.isValidIP(val, family: .AnyFamily) {
-                        finalVal.append(val)
-                    } else {
-                        print("\(v) is not a valid IP Address.")
-                        valid = false
-                    }
-                }
-                if valid {
-                    dns = finalVal
-                    break
-                }
-            } else {
-                dns.append(defaultDNS)
-                break;
-            }
-        }
 
         var redirectTraffic:Bool = true
         while true {
@@ -566,6 +545,75 @@ class Interactive {
             } else {
                 redirectTraffic = true
                 break
+            }
+        }
+
+        var dns:[String] = []
+        let defaultDNSChoice:Int
+        var customDNS = false
+        if redirectTraffic {
+            defaultDNSChoice = 1
+        } else {
+            defaultDNSChoice = 4
+        }
+        print("Please specify DNS servers to push to connecting clients:")
+        print("\t1 - CloudFlare (\(cloudflareDNS.joined(separator: " & ")))")
+        print("\t2 - Google (\(googleDNS.joined(separator: " & ")))")
+        print("\t3 - OpenDNS (\(openDNS.joined(separator: " & ")))")
+        print("\t4 - Local Server (\(localDNS)). You will need a DNS server running beside your VPN server")
+        print("\t5 - Custom")
+        print("\t6 - None")
+        while true {
+            if let input = askQuestion("Please select an option [\(defaultDNSChoice)]:") {
+                switch input {
+                case "1":
+                    dns.append(contentsOf: cloudflareDNS)
+                case "2":
+                    dns.append(contentsOf: googleDNS)
+                case "3":
+                    dns.append(contentsOf: openDNS)
+                case "4":
+                    dns.append(localDNS)
+                case "5":
+                    customDNS = true
+                case "6", ".":
+                    break
+                default:
+                    print("\(input) is not a valid choice")
+                    continue
+                }
+                // Default will continue, so we can break here
+                break
+            } else {
+                if defaultDNSChoice == 1 {
+                    dns.append(contentsOf: cloudflareDNS)
+                } else {
+                    dns.append(localDNS)
+                }
+                break
+            }
+        }
+        if customDNS {
+            while true {
+                if let input = askQuestion("Enter Custom DNS Servers, comma separated for multiple:", allowedBlank:false) {
+                    //Validate
+                    var finalVal:[String] = []
+                    let vals = input.components(separatedBy: ",")
+                    var valid = true
+                    for v in vals {
+                        let val = v.trim()
+                        if IPAddress.isValidIP(val, family: .AnyFamily) {
+                            finalVal.append(val)
+                        } else {
+                            print("\(v) is not a valid IP Address.")
+                            valid = false
+                        }
+                    }
+                    if valid {
+                        dns = finalVal
+                        break
+                    }
+                }
             }
         }
 

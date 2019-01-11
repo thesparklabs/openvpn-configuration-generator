@@ -3,6 +3,7 @@
 #pragma once
 
 #include "OpenSSLHelper.h"
+#include <string>
 
 using namespace System;
 using namespace System::Collections::Generic;
@@ -35,8 +36,12 @@ private:
 	String ^ defaultEmail = "me@host.domain";
 
 	String ^ defaultProtocol = "UDP";
-	String ^ defaultDNS = "10.8.0.1";
 	String ^ defaultPort = "1194";
+
+	static array<String^>^ cloudflareDNS = { "1.1.1.1", "1.0.0.1" };
+	static array<String^>^ googleDNS = { "8.8.8.8", "8.8.4.4" };
+	static array<String^>^ openDNS = { "208.67.222.222", "208.67.220.220" };
+	static String^ localDNS = "10.8.0.1";
 
 	String ^ path;
 	String ^ configPath;

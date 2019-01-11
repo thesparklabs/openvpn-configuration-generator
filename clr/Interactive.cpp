@@ -612,39 +612,6 @@ bool Interactive::GenerateNewConfig()
 		Console::WriteLine("Invalid input, try again");
 	}
 
-	List<String^>^ dns = gcnew List<String^>();
-	while (true) {
-		String^ input = askQuestion(String::Format("DNS Servers, comma separated for multiple [{0}]:", defaultDNS), true);
-		if (String::IsNullOrEmpty(input)) {
-			dns = gcnew List<String^>(1);
-			dns->Add(defaultDNS);
-			break;
-		}
-		if (input == ".") {
-			dns = gcnew List<String^>(0);
-			break;
-		}
-		//Try and split whatever input was given
-		dns->Clear();
-		array<String^>^ vals = input->Split(gcnew array<String^>{ "," }, StringSplitOptions::RemoveEmptyEntries);
-		System::Net::IPAddress^ discard;
-		bool valid = true;
-		for each (String^ var in vals)
-		{
-			String^ tmp = var->Trim();
-			if (System::Net::IPAddress::TryParse(tmp, discard)) {
-				dns->Add(tmp);
-			}
-			else {
-				Console::WriteLine(tmp + " is not a valid IP Address.");
-				valid = false;
-				break;
-			}
-		}
-		if (valid)
-			break;
-	}
-
 	bool redirectTraffic = true;
 	while (true) {
 		String^ input = askQuestion("Redirect all traffic through VPN? [Y/n]:", false)->ToLower();
@@ -657,6 +624,79 @@ bool Interactive::GenerateNewConfig()
 		}
 		Console::WriteLine("Invalid input, try again.");
 	}
+
+	List<String^>^ dns = gcnew List<String^>();
+
+	int defaultDNSChoice;
+	bool customDNS = false;
+	if (redirectTraffic)
+		defaultDNSChoice = 1;
+	else
+		defaultDNSChoice = 4;
+
+	Console::WriteLine("Please specify DNS servers to push to connecting clients:");
+	Console::WriteLine(String::Format("\t1 - CloudFlare ({0})", String::Join(" & ", cloudflareDNS)));
+	Console::WriteLine(String::Format("\t1 - Google ({0})", String::Join(" & ", googleDNS)));
+	Console::WriteLine(String::Format("\t1 - OpenDNS ({0})", String::Join(" & ", openDNS)));
+	Console::WriteLine(String::Format("\t1 - Local Server ({0}). You will need a DNS server running beside your VPN server", localDNS));
+	Console::WriteLine("\t5 - Custom");
+	Console::WriteLine("\t6 - None");
+	
+	while (true) {
+		String^ input = askQuestion(String::Format("Please select an option [{0:D}]:", defaultDNSChoice), true);
+		if (String::IsNullOrEmpty(input)) {
+			if (defaultDNSChoice == 1)
+				dns->AddRange(cloudflareDNS);
+			else
+				dns->Add(localDNS);
+		}
+		else if (input == "1")
+			dns->AddRange(cloudflareDNS);
+		else if (input == "2")
+			dns->AddRange(googleDNS);
+		else if (input == "3")
+			dns->AddRange(openDNS);
+		else if (input == "4")
+			dns->Add(localDNS);
+		else if (input == "5")
+			customDNS = true;
+		else if (input == "6" || input == ".")
+			break;
+		else {
+			Console::WriteLine(String::Format("{0} is not a valid choice", input));
+			continue;
+		}
+		// Default will continue, so we can break here
+		break;
+	}
+
+	if (customDNS) {
+		while (true) {
+			String^ input = askQuestion("Enter Custom DNS Servers, comma separated for multiple:", false);
+			if (String::IsNullOrWhiteSpace(input))
+				continue;
+			//Try and split whatever input was given
+			dns->Clear();
+			array<String^>^ vals = input->Split(gcnew array<String^>{ "," }, StringSplitOptions::RemoveEmptyEntries);
+			System::Net::IPAddress^ discard;
+			bool valid = true;
+			for each (String^ var in vals)
+			{
+				String^ tmp = var->Trim();
+				if (System::Net::IPAddress::TryParse(tmp, discard)) {
+					dns->Add(tmp);
+				}
+				else {
+					Console::WriteLine(tmp + " is not a valid IP Address.");
+					valid = false;
+					break;
+				}
+			}
+			if (valid)
+				break;
+		}
+	}
+
 	bool useDefaults = true;
 	while (true) {
 		String^ input = askQuestion("Would you like to use anonymous defaults for certificate details? [Y/n]:", false)->ToLower();
