@@ -6,7 +6,7 @@ Further documentation and tutorials [can be found here](https://www.sparklabs.co
 
 ## Overview
 The OpenVPN Configuration Generator is designed to make generating server and 
-client configurations for an OpenVPN server easier.
+client configurations for an OpenVPN server and Viscosity easier.
 
 ## Download
 Releases for macOS, Windows, and Linux can be [downloaded here](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest).
