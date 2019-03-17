@@ -636,9 +636,9 @@ bool Interactive::GenerateNewConfig()
 
 	Console::WriteLine("Please specify DNS servers to push to connecting clients:");
 	Console::WriteLine(String::Format("\t1 - CloudFlare ({0})", String::Join(" & ", cloudflareDNS)));
-	Console::WriteLine(String::Format("\t1 - Google ({0})", String::Join(" & ", googleDNS)));
-	Console::WriteLine(String::Format("\t1 - OpenDNS ({0})", String::Join(" & ", openDNS)));
-	Console::WriteLine(String::Format("\t1 - Local Server ({0}). You will need a DNS server running beside your VPN server", localDNS));
+	Console::WriteLine(String::Format("\t2 - Google ({0})", String::Join(" & ", googleDNS)));
+	Console::WriteLine(String::Format("\t3 - OpenDNS ({0})", String::Join(" & ", openDNS)));
+	Console::WriteLine(String::Format("\t4 - Local Server ({0}). You will need a DNS server running beside your VPN server", localDNS));
 	Console::WriteLine("\t5 - Custom");
 	Console::WriteLine("\t6 - None");
 	
