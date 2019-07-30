@@ -25,6 +25,7 @@ class Interactive {
     let pkiPath:URL
     let caPath:URL
     let keyPath:URL
+    let crlPath:URL
     let clientsPath:URL
 
     var keySize:Int
@@ -50,6 +51,7 @@ class Interactive {
         self.pkiPath = self.path.appendingPathComponent("pki")
         self.caPath = self.pkiPath.appendingPathComponent("ca.crt")
         self.keyPath = self.pkiPath.appendingPathComponent("ca.key")
+        self.crlPath = self.pkiPath.appendingPathComponent("crl.crt")
         self.clientsPath = self.path.appendingPathComponent("clients")
         self.keySize = keySize
         self.validDays = validDays
@@ -127,7 +129,7 @@ class Interactive {
         do {
             try json.write(to: self.configPath, atomically: true, encoding: .utf8)
         } catch {
-            print("ERROR: Failed to write config to \(path.path). \(error)")
+            print("ERROR: Failed to write config to \(configPath.path). \(error)")
             return false
         }
         return true;
@@ -281,6 +283,9 @@ class Interactive {
         file += "verb 3\n"
         file += "mute 10\n"
         file += "ca ca.crt\ncert server.crt\nkey server.key\n"
+        if FileManager.default.fileExists(atPath: self.crlPath.path) {
+            file += "crl-verify crl.crt\n"
+        }
         file += "port \(port)\n"
         file += "dev tun0\n"
         file += "server 10.8.0.0 255.255.255.0\n"
@@ -337,6 +342,14 @@ class Interactive {
             try Utilities.copyItem(at: keypath, to: serverPath.appendingPathComponent("server.key"))
         } catch {
             print("ERROR: Failed to copy key. \(error)")
+            return false
+        }
+        do {
+            if FileManager.default.fileExists(atPath: self.crlPath.path) {
+                try Utilities.copyItem(at: self.crlPath, to: serverPath.appendingPathComponent("crl.crt"))
+            }
+        } catch {
+            print("ERROR: Failed to copy CRL. \(error)")
             return false
         }
         print("Successfully generated server configuration at \(serverPath.path).")
@@ -720,5 +733,89 @@ class Interactive {
 
         //Save to file
         return self.saveConfig()
+    }
+    func revokeCert(name: String? = nil) -> Bool {
+
+        if !FileManager.default.fileExists(atPath: self.pkiPath.path) {
+            print("ERROR: There are no certificates to revoke.")
+            return false
+        }
+        guard let issuer = self.Issuer else {
+            print("ERROR: No issuer available")
+            return false
+        }
+        let CN:String
+        if let n = name {
+            CN = n
+        } else {
+            if let input = askQuestion("Common Name of certificate to revoke:", allowedBlank: false) {
+                CN = input
+            } else {
+                return false
+            }
+        }
+        // Make sure we dont try to revoke ourself
+        if (CN == "cert") {
+            print("ERROR: Cannot revoke this.")
+            return false
+        }
+
+        // FInd the certificate
+        let certname = "\(CN).crt"
+        let certpath = self.pkiPath.appendingPathComponent(certname)
+        guard let clientcert = Certificate(withCertificateFile: certpath.path) else {
+            print("ERROR: Failed to load certificate")
+            return false
+        }
+        // Check for existing CRL
+        let crlData = try? String(contentsOfFile: self.crlPath.path)
+
+        // Create/Update CRL
+        guard let newCrl = issuer.createCRL(crlData:crlData, revokeCert:clientcert, daysValid:self.validDays) else {
+            return false
+        }
+        // Write CRL
+        do {
+        #if os(Windows)
+            try newCrl.write(to: self.crlPath, atomically:false, encoding: .utf8)
+        #else
+            try newCrl.write(to: self.crlPath, atomically:true, encoding: .utf8)
+        #endif
+        } catch {
+            print("ERROR: Failed to write CRL to disk. \(error)")
+            return false
+        }
+
+        // Delete PKI and configuration for this user
+        do {
+            try FileManager.default.removeItem(at: certpath)
+        } catch {
+            print("ERROR: Failed to remove revoked PKI data. \(error)")
+        }
+        let keypath = self.pkiPath.appendingPathComponent("\(CN).key")
+        do {
+            try FileManager.default.removeItem(at: keypath)
+        } catch {
+            print("ERROR: Failed to remove revoked PKI data. \(error)")
+        }
+        let confpath = self.clientsPath.appendingPathComponent("\(CN).visz")
+        do {
+            try FileManager.default.removeItem(at: confpath)
+        } catch {
+            print("ERROR: Failed to remove revoked PKI data. \(error)")
+        }
+        print()
+        print("\"\(CN)\" has been successfully revoked. The CRL file has been saved to \"\(self.crlPath)\".")
+        print("Please leave a copy of the CRL file in place if you wish to update it in the future.")
+        print()
+        if let input = askQuestion("Regenerate Server configuration? [Y/n]:", allowedBlank: false)?.lowercased(), 
+            input == "y" {
+            _ = self.createServerConfig()
+        } else {
+            // Blank, so Y
+            _ = self.createServerConfig()
+        }
+
+        return true
     }
 }

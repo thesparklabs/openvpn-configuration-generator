@@ -14,6 +14,7 @@ CLI::CLI()
 	ModeStrings = gcnew List<String^>(2);
 	ModeStrings->Add("client");
 	ModeStrings->Add("init");
+	ModeStrings->Add("revoke");
 	ModeStrings->Add("--help");
 	ModeStrings->Add("--about");
 }
@@ -55,6 +56,12 @@ void CLI::printUsage()
 	Console::WriteLine("");
 	Console::WriteLine(String::Format("Usage: {0} client", name));
 	Console::WriteLine("Creates client configurations");
+	Console::WriteLine("Optional:");
+	Console::WriteLine("  --path DIR      Directory configurations are stored (Current Directory default)");
+	Console::WriteLine("  --name NAME     Prefill Common Name");
+	Console::WriteLine("");
+	Console::WriteLine(String::Format("Usage: {0} revoke", name));
+	Console::WriteLine("Revoke a client and create/update the CRL");
 	Console::WriteLine("Optional:");
 	Console::WriteLine("  --path DIR      Directory configurations are stored (Current Directory default)");
 	Console::WriteLine("  --name NAME     Prefill Common Name");

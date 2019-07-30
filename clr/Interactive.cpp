@@ -14,6 +14,7 @@ Interactive::Interactive(String ^ path, int keySize, int validDays)
 	this->pkiPath = Path::Combine(path, "pki");
 	this->caPath = Path::Combine(this->pkiPath, "ca.crt");
 	this->keyPath = Path::Combine(this->pkiPath, "ca.key");
+	this->crlPath = Path::Combine(this->pkiPath, "crl.crt");
 	this->clientsPath = Path::Combine(path, "clients");
 }
 
@@ -49,11 +50,22 @@ bool Interactive::LoadConfig()
 	if (dict->TryGetValue("keysize", val)) {
 		this->keySize = Convert::ToInt32(val);		
 	}
+	else {
+		this->keySize = 2048;
+	}
 	if (dict->TryGetValue("validdays", val)) {
 		this->validDays = Convert::ToInt32(val);
 	}
+	else {
+		// Default
+		this->validDays = 3650;
+	}
 	if (dict->TryGetValue("serial", val)) {
 		this->_serial = Convert::ToInt32(val);
+	}
+	else {
+		Console::WriteLine("ERROR: Failed to load serial from config");
+		return false;
 	}
 
 	//Load in CA
@@ -168,6 +180,13 @@ bool Interactive::CreateServerConfig()
 		return false;
 	}
 
+	if (!File::Exists(certpath) || !File::Exists(keypath)) {
+		if (!this->createNewServerIdentity()) {
+			Console::WriteLine("ERROR: Failed to generate server identity.");
+			return false;
+		}
+	}
+
 	String^ port;
 	String^ proto;
 	try {
@@ -182,11 +201,6 @@ bool Interactive::CreateServerConfig()
 	}
 	catch (Exception ^ e) {
 		Console::WriteLine("ERROR: Invalid config. Please regenerate config");
-		return false;
-	}
-
-	if (!this->createNewServerIdentity()) {
-		Console::WriteLine("ERROR: Failed to generate server identity.");
 		return false;
 	}
 	if (!File::Exists(certpath)) {
@@ -210,6 +224,9 @@ bool Interactive::CreateServerConfig()
 	file += "verb 3\n";
 	file += "mute 10\n";
 	file += "ca ca.crt\ncert server.crt\nkey server.key\n";
+	if (File::Exists(this->crlPath)) {
+		file += "crl-verify crl.crt\n";
+	}
 	file += "port {1}\n";
 	file += "dev tun0\n";
 	file += "server 10.8.0.0 255.255.255.0\n";
@@ -261,31 +278,40 @@ bool Interactive::CreateServerConfig()
 	}
 	//Copy Files
 	try {
-		File::Copy(this->caPath, Path::Combine(serverPath, "ca.crt"));
+		File::Copy(this->caPath, Path::Combine(serverPath, "ca.crt"), true);
 	}
 	catch (Exception^ e) {
 		Console::WriteLine("ERROR: Failed to copy CA. {0}", e->Message);
 		return false;
 	}
 	try {
-		File::Copy(certpath, Path::Combine(serverPath, "server.crt"));
+		File::Copy(certpath, Path::Combine(serverPath, "server.crt"), true);
 	}
 	catch (Exception^ e) {
 		Console::WriteLine("ERROR: Failed to copy Cert. {0}", e->Message);
 		return false;
 	}
 	try {
-		File::Copy(dhPath, Path::Combine(serverPath, "dh.crt"));
+		File::Copy(dhPath, Path::Combine(serverPath, "dh.crt"), true);
 	}
 	catch (Exception^ e) {
 		Console::WriteLine("ERROR: Failed to copy DH. {0}", e->Message);
 		return false;
 	}
 	try {
-		File::Copy(keypath, Path::Combine(serverPath, "server.key"));
+		File::Copy(keypath, Path::Combine(serverPath, "server.key"), true);
 	}
 	catch (Exception^ e) {
 		Console::WriteLine("ERROR: Failed to copy Key. {0}", e->Message);
+		return false;
+	}
+	try {
+		if (File::Exists(this->crlPath)) {
+			File::Copy(this->crlPath, Path::Combine(serverPath, "crl.crt"), true);
+		}
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to copy CRL. {0}", e->Message);
 		return false;
 	}
 	Console::WriteLine("Successfully generated server configuration at {0}.", serverPath);
@@ -776,7 +802,6 @@ bool Interactive::GenerateNewConfig()
 	Dictionary<String^, Object^>^ config = cs->toDict();
 	config->Add("proto", proto);
 	config->Add("port", port);
-	//config->Add("dns", dns);
 	config->Add("server", address);
 	config->Add("redirect", redirectTraffic);
 	config->Add("keysize", this->keySize);
@@ -787,4 +812,120 @@ bool Interactive::GenerateNewConfig()
 	this->cSubject = cs;
 
 	return this->SaveConfig();
+}
+
+bool Interactive::RevokeCert(String ^ name)
+{
+	if (!Directory::Exists(this->pkiPath)) {
+		Console::WriteLine("ERROR: There are no certificates to revoke.");
+		return false;
+	}
+	String^ CN;
+	if (!String::IsNullOrWhiteSpace(name)) {
+		CN = name;
+	}
+	else {
+		String^ input = askQuestion("Common Name of certificate to revoke:", false);
+		if (String::IsNullOrWhiteSpace(input)) {
+			return false;
+		}
+		else {
+			CN = input;
+		}
+	}
+	// Make sure we don't revoke ourself
+	if (CN == "cert") {
+		Console::WriteLine("ERROR: Cannot revoke this.");
+		return false;
+	}
+	// Find the certificate
+	String^ certname = String::Format("{0}.crt", CN);
+	String^ certpath = Path::Combine(pkiPath, certname);
+	String^ certData;
+	if (!File::Exists(certpath)) {
+		Console::WriteLine("ERROR: Certificate not found.");
+		return false;
+	}
+	else {
+		try {
+			StreamReader^ sr = gcnew StreamReader(certpath);
+			certData = sr->ReadToEnd();
+			sr->Close();
+		}
+		catch (Exception^ e) {
+			Console::WriteLine("ERROR: Failed to read certificate off disk.");
+			return false;
+		}
+	}
+	String^ crlData;
+	if (File::Exists(this->crlPath)) {
+		try {
+			StreamReader^ sr = gcnew StreamReader(this->crlPath);
+			crlData = sr->ReadToEnd();
+			sr->Close();
+			Console::WriteLine("Existing CRL found and will be appended to.");
+		}
+		catch (Exception^ e) {
+			Console::WriteLine("ERROR: Failed to read CRL off disk.");
+			return false;
+		}
+	}
+	else {
+		crlData = nullptr;
+		Console::WriteLine("No existing CRL was found, a new CRL will be created.");
+	}
+
+	// Create/Update CRL
+	try {
+		crlData = OpenSSLHelper::CreateCRL(this->Issuer, crlData, certData, this->validDays);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("Failed to create CRL. {0}", e->Message);
+		return false;
+	}
+
+	// Write the file to disk
+	try {
+		StreamWriter^ sw = gcnew StreamWriter(this->crlPath);
+		sw->Write(crlData);
+		sw->Flush();
+		sw->Close();
+	}
+	catch (Exception^ e) {
+		Console::WriteLine("ERROR: Failed to write CRL to disk. {0}", e->Message);
+		return false;
+	}
+
+	// Delete the PKI and configuration for this user
+	try {
+		File::Delete(certpath);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine(String::Format("WARNING: Failed to remove revoked PKI data. {0}", e->Message));
+	}
+	String^ keypath = Path::Combine(this->pkiPath, String::Format("{0}.key", CN));
+	try {
+		File::Delete(keypath);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine(String::Format("WARNING: Failed to remove revoked PKI data. {0}", e->Message));
+	}
+	String^ confPath = Path::Combine(this->clientsPath, String::Format("{0}.visz", CN));
+	try {
+		File::Delete(confPath);
+	}
+	catch (Exception^ e) {
+		Console::WriteLine(String::Format("WARNING: Failed to remove revoked PKI data. {0}", e->Message));
+	}
+
+	Console::WriteLine();
+	Console::WriteLine(String::Format("\"{0}\" has been successfully revoked. The CRL file has been saved to \"{1}\".", CN, this->crlPath));
+	Console::WriteLine("Please leave a copy of the CRL file in place if you wish to update it in the future.");
+	Console::WriteLine();
+	String^ input = askQuestion("Regenerate Server configuration? [Y/n]:", false)->ToLower();
+	if (input == String::Empty || input == "y") {
+		this->CreateServerConfig();
+	}
+
+	return true;
 }

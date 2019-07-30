@@ -25,6 +25,7 @@ public:
 	bool CreateServerConfig();
 	bool CreateNewClientConfig(String^ name);
 	bool GenerateNewConfig();
+	bool RevokeCert(String^ name);
 
 private:
 	String ^ defaultCountry = "AU";
@@ -48,6 +49,7 @@ private:
 	String ^ pkiPath;
 	String ^ caPath;
 	String ^ keyPath;
+	String ^ crlPath;
 	String ^ clientsPath;
 
 	CertificateSubject^ cSubject;

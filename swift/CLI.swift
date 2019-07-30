@@ -19,6 +19,12 @@ class CLI {
         print("  --path DIR      Directory configurations are stored (Current Directory default)")
         print("  --name NAME     Prefill Common Name")
         print("")
+        print("Usage: \(exename) revoke")
+        print("Revoke a client and create/update the CRL")
+        print("Optional:")
+        print("  --path DIR      Directory configurations are stored (Current Directory default)")
+        print("  --name NAME     Prefill Common Name")
+        print("")
         print("Usage: \(exename) --help")
         print("Displays this information")
         print("")
@@ -52,6 +58,7 @@ enum OptionType: String {
 enum Mode: String {
     case CreateClient = "client"
     case InitSetup = "init"
+    case Revoke = "revoke"
     case Help = "--help"
     case About = "--about"
     case unknown

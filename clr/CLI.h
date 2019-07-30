@@ -17,7 +17,7 @@ public:
 		CommonName, Path, KeySize, ValidDays, Unknown
 	};
 	enum class Mode {
-		CreateClient, InitSetup, Help, About, Unknown
+		CreateClient, InitSetup, Revoke, Help, About, Unknown
 	};
 
 	OptionType getOption(String^ option);

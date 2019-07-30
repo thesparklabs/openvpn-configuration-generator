@@ -114,6 +114,16 @@ if mode == .InitSetup {
     }
     print("Successfully created new client")
     exit(0)
+} else if mode == .Revoke {
+    let interactive = Interactive(path:path)
+    guard interactive.loadConfig() else {
+        exit(1)
+    }
+    guard interactive.revokeCert(name: options[.commonName]) else {
+        exit(1)
+    }
+    exit(0)
+
 } else {
     print("Unknown Mode")
     CLI.printUsage()
