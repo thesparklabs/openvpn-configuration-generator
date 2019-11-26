@@ -27,12 +27,25 @@ Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --keysize size  Change Keysize (2048 default)
   --days days     Days certificates are valid (3650 default)
+  --algorithm (rsa|ecdsa|eddsa) Algorithm to use (RSA default)
+                                ECDSA defaults to secp384r1. EDDSA defaults to ED25519
+  --curve curve_name            ECDSA/EDDSA curve to use
+  --curve suffix  Appends suffix to server file names. Simplifies running multiple servers slightly.
 
 Usage: openvpn-generate client
 Creates client configurations
 Optional:
   --path DIR      Directory configurations are stored (Current Directory default)
   --name NAME     Prefill Common Name
+
+Usage: openvpn-generate revoke
+Revoke a client and create/update the CRL
+Optional:
+  --path DIR      Directory configurations are stored (Current Directory default)
+  --name NAME     Prefill Common Name
+
+Usage: openvpn-generate --show-curves
+Show available ECDSA curves
 
 Usage: openvpn-generate --help
 Displays this information
