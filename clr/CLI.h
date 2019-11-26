@@ -14,19 +14,22 @@ public:
 	~CLI();
 
 	enum class OptionType {
-		CommonName, Path, KeySize, ValidDays, Unknown
+		CommonName, Path, KeySize, ValidDays, Algorithm, Curve, Suffix, Unknown
 	};
 	enum class Mode {
-		CreateClient, InitSetup, Revoke, Help, About, Unknown
+		CreateClient, InitSetup, Revoke, ShowCurves, Help, About, Unknown
 	};
 
 	OptionType getOption(String^ option);
 	Mode getMode(String^ mode);
+	OpenSSLHelper::Algorithm getAlgorithm(String^ alg);
 	void printUsage();
 	void printAbout();
+	void showCurves();
 
 private:
 	List<String^>^ OptionTypeStrings;
 	List<String^>^ ModeStrings;
+	List<String^>^ AlgStrings;
 };
 

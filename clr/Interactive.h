@@ -16,7 +16,7 @@ using namespace System::IO;
 ref class Interactive
 {
 public:
-	Interactive(String^ path, int keySize, int validDays);
+	Interactive(String^ path, OpenSSLHelper::Algorithm algorithm, int keySize, String^ ecCurve, int validDays, String^ suffix);
 
 	bool LoadConfig();
 	bool SaveConfig();
@@ -61,6 +61,9 @@ private:
 	int keySize;
 	int validDays;
 	int _serial = 0;
+	OpenSSLHelper::Algorithm keyAlg;
+	String^ curveName;
+	String^ suffix;
 	property int Serial {
 		int get() {
 			int ss = _serial + 1;

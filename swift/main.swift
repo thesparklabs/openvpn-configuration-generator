@@ -18,6 +18,11 @@ if (mode == .unknown) {
     CLI.printUsage()
     exit(1)
 }
+if mode == .ShowCurves {
+    Utilities.initOpenSSL()
+    CLI.showCurves()
+    exit(0)
+}
 if mode == .Help {
     CLI.printUsage()
     exit(0)
@@ -82,6 +87,23 @@ if mode == .InitSetup {
             exit(1)
         }
     }
+    if let sAlg = options[.algorithm] {
+        if let alg = CLI.getAlgorithm(sAlg) {
+            interactive.keyAlg = alg
+        } else {
+            print("'\(sAlg)' is not a valid \(OptionType.algorithm)")
+            exit(1)
+        }
+    }
+    if let curve = options[.curve] {
+        interactive.curveName = curve
+    } else if interactive.keyAlg == .EdDSA {
+        interactive.curveName = "ED25519"
+    }
+    if let suffix = options[.suffix] {
+        interactive.suffix = suffix
+    }
+
     if !interactive.generateNewConfig() {
         exit(1)
     }
@@ -90,8 +112,10 @@ if mode == .InitSetup {
     guard interactive.createNewIssuer() else {
         exit(1)
     }
-    guard interactive.createDH() else {
-        exit(1)
+    if interactive.keyAlg == .RSA {
+        guard interactive.createDH() else {
+            exit(1)
+        }
     }
     guard interactive.createServerConfig() else {
         exit(1)

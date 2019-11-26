@@ -3,6 +3,10 @@
 import Foundation
 import SparkLabsCore
 
+#if os(Windows)
+import SWCompression
+#endif
+
 class Interactive {
     var defaultCountry = "AU"
     var defaultState = "NSW"
@@ -38,6 +42,9 @@ class Interactive {
             return ss
         }
     }
+    var keyAlg:Key.KeyType
+    var curveName:String
+    var suffix:String
 
     let protectedCNs = ["server", "ca"]
 
@@ -55,6 +62,9 @@ class Interactive {
         self.clientsPath = self.path.appendingPathComponent("clients")
         self.keySize = keySize
         self.validDays = validDays
+        self.keyAlg = .RSA
+        self.curveName = "secp384r1"
+        self.suffix = ""
     }
     fileprivate func askQuestion(_ question:String, allowedBlank:Bool = true) -> String? {
         while true {
@@ -108,6 +118,15 @@ class Interactive {
         if let ser = self.config["serial"] as? Int {
             self._serial = ser
         }
+        if let sAlg = self.config["algorithm"] as? String, let alg = CLI.getAlgorithm(sAlg) {
+            self.keyAlg = alg
+        }
+        if let curveName = self.config["eccurve"] as? String {
+            self.curveName = curveName
+        }
+        if let suffix = self.config["suffix"] as? String {
+            self.suffix = suffix
+        }
         
         //Find and load CA/Key
         guard let cert = Certificate(withCertificateFile: caPath.path), let key = Key(withFilePath: keyPath.path) else {
@@ -127,7 +146,11 @@ class Interactive {
         }
         //Save to file
         do {
+        #if os(Windows)
+            try json.write(to: self.configPath, atomically: false, encoding: .utf8)
+        #else
             try json.write(to: self.configPath, atomically: true, encoding: .utf8)
+        #endif
         } catch {
             print("ERROR: Failed to write config to \(configPath.path). \(error)")
             return false
@@ -152,7 +175,11 @@ class Interactive {
             return false
         }
         do {
+        #if os(Windows)
+            try cert.write(to: capath, atomically:false, encoding: .utf8)
+        #else
             try cert.write(to: capath, atomically:true, encoding: .utf8)
+        #endif
         } catch {
             print("ERROR: Failed to save CA Certificate to \(capath). \(error)")
         }
@@ -161,7 +188,11 @@ class Interactive {
             return false
         }
         do {
+        #if os(Windows)
+            try key.write(to: keypath, atomically:false, encoding: .utf8)
+        #else
             try key.write(to: keypath, atomically:true, encoding: .utf8)
+        #endif
         } catch {
             print("ERROR: Failed to save CA Key to \(keypath). \(error)")
             return false
@@ -175,7 +206,7 @@ class Interactive {
             print("ERROR: No Subject available.")
             return false;
         }
-        guard let identity = Identity.createCAAndKey(subject: subject, bitLength: keySize, daysValid: self.validDays, serial: self.Serial) else {
+        guard let identity = Identity.createCAAndKey(subject: subject, keyType:self.keyAlg, bitLength: keySize, curve:self.curveName, daysValid: self.validDays, serial: self.Serial) else {
             print("ERROR: Failed to create CA")
             return false
         }
@@ -208,7 +239,11 @@ class Interactive {
         //Save to disk
         let dhPath = self.pkiPath.appendingPathComponent("dh.pem")
         do {
+        #if os(Windows)
+            try dhPem.write(to: dhPath, atomically: false, encoding: .utf8)
+        #else
             try dhPem.write(to: dhPath, atomically: true, encoding: .utf8)
+        #endif
         } catch {
             print("ERROR: Failed to save DH Params to \(dhPath.path). \(error)")
             return false
@@ -228,13 +263,18 @@ class Interactive {
         //Update the CN
         subject.CommonName = "server"
         //Create ID
-        guard let identity = issuer.createNewServerBundle(subject: subject, bitLength: keySize, daysValid: self.validDays, serial: self.Serial) else {
+        guard let identity = issuer.createNewServerBundle(subject: subject, keyType:self.keyAlg, bitLength: keySize, curve:self.curveName, daysValid: self.validDays, serial: self.Serial) else {
             print("ERROR: Failed to create server identity")
             return false
         }
         return saveIdentity(identity, name:"server")
     }
     func createServerConfig() -> Bool {
+        let caName = "ca\(self.suffix).crt"
+        let crlName = "crl\(self.suffix).crt"
+        let certName = "server\(self.suffix).crt"
+        let keyName = "server\(self.suffix).key"
+        let dhName = "dh\(self.suffix).pem"
         let certpath = self.pkiPath.appendingPathComponent("server.crt")
         let keypath = self.pkiPath.appendingPathComponent("server.key")
         let dhPath = self.pkiPath.appendingPathComponent("dh.pem")
@@ -242,9 +282,11 @@ class Interactive {
             print("ERROR: Missing CA. Please regenerate config")
             return false
         }
-        guard FileManager.default.fileExists(atPath: dhPath.path) else {
-            print("ERROR: Missing DH. Please regenerate config")
-            return false
+        if self.keyAlg == .RSA {
+            guard FileManager.default.fileExists(atPath: dhPath.path) else {
+                print("ERROR: Missing DH. Please regenerate config")
+                return false
+            }
         }
         guard let _ = config["server"] as? String,
             let port = config["port"] as? String,
@@ -273,18 +315,30 @@ class Interactive {
         //Form the config
         var file = "#-- Config Auto Generated by SparkLabs OpenVPN Certificate Generator --#\n"
         file +=    "#--                   Config for OpenVPN 2.4 Server                  --#\n\n"
-        file += "dh dh.crt\n"
         file += "proto \(proto)\n"
-        file += "ifconfig-pool-persist ipp.txt\n"
+        file += "ifconfig-pool-persist ipp\(self.suffix).txt\n"
         file += "keepalive 10 120\n"
         file += "user nobody\ngroup nogroup\n"
         file += "persist-key\npersist-tun\n"
-        file += "status openvpn-status.log\n"
+        file += "status openvpn-status\(self.suffix).log\n"
         file += "verb 3\n"
         file += "mute 10\n"
-        file += "ca ca.crt\ncert server.crt\nkey server.key\n"
+        file += "ca \(caName)\ncert \(certName)\nkey \(keyName)\n"
         if FileManager.default.fileExists(atPath: self.crlPath.path) {
-            file += "crl-verify crl.crt\n"
+            file += "crl-verify \(crlName)\n"
+        }
+        if self.keyAlg == .RSA {
+            file += "dh \(dhName)\n"
+        } else if self.keyAlg == .EdDSA {
+            file += "dh none\n";
+            file += "# Note this curve probably isn't supported (yet), however OpenVPN will fall back to another (secp384r1)\n";
+            file += "ecdh-curve \(self.curveName)\n";
+            file += "tls-cipher TLS_AES_256_GCM_SHA384\n";
+        } else { // ECDSA
+            file += "tls-version-min 1.2\n";
+            file += "dh none\n";
+            file += "ecdh-curve \(self.curveName)\n";
+            file += "tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384\n";
         }
         file += "port \(port)\n"
         file += "dev tun0\n"
@@ -314,39 +368,45 @@ class Interactive {
         }
         //Write server config
         do {
-            try file.write(to: serverPath.appendingPathComponent("server.conf"), atomically:true, encoding: .utf8)
+        #if os(Windows)
+            try file.write(to: serverPath.appendingPathComponent("server\(self.suffix).conf"), atomically:false, encoding: .utf8)
+        #else
+            try file.write(to: serverPath.appendingPathComponent("server\(self.suffix).conf"), atomically:true, encoding: .utf8)
+        #endif
         } catch {
             print("ERROR: Failed to write server config. \(error)")
             return false
         }
         //Copy files
         do {
-            try Utilities.copyItem(at: self.caPath, to: serverPath.appendingPathComponent("ca.crt"))
+            try Utilities.copyItem(at: self.caPath, to: serverPath.appendingPathComponent(caName))
         } catch {
             print("ERROR: Failed to copy CA. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: certpath, to: serverPath.appendingPathComponent("server.crt"))
+            try Utilities.copyItem(at: certpath, to: serverPath.appendingPathComponent(certName))
         } catch {
             print("ERROR: Failed to copy Cert. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: dhPath, to: serverPath.appendingPathComponent("dh.crt"))
+            if self.keyAlg == .RSA {
+                try Utilities.copyItem(at: dhPath, to: serverPath.appendingPathComponent(dhName))
+            }
         } catch {
             print("ERROR: Failed to copy DH. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: keypath, to: serverPath.appendingPathComponent("server.key"))
+            try Utilities.copyItem(at: keypath, to: serverPath.appendingPathComponent(keyName))
         } catch {
             print("ERROR: Failed to copy key. \(error)")
             return false
         }
         do {
             if FileManager.default.fileExists(atPath: self.crlPath.path) {
-                try Utilities.copyItem(at: self.crlPath, to: serverPath.appendingPathComponent("crl.crt"))
+                try Utilities.copyItem(at: self.crlPath, to: serverPath.appendingPathComponent(crlName))
             }
         } catch {
             print("ERROR: Failed to copy CRL. \(error)")
@@ -366,7 +426,7 @@ class Interactive {
         }
         subject.CommonName = name
         //Create ID
-        guard let identity = issuer.createNewUserBundle(subject: subject, bitLength: keySize, daysValid: self.validDays, serial: self.Serial) else {
+        guard let identity = issuer.createNewUserBundle(subject: subject, keyType:self.keyAlg, bitLength: keySize, curve:self.curveName, daysValid: self.validDays, serial: self.Serial) else {
             print("ERROR: Failed to create client identity")
             return false
         }
@@ -465,32 +525,175 @@ class Interactive {
         file += "persist-tun\npersist-key\nnobind\npull\n"
         //Write config
         do {
+        #if os(Windows)
+            try file.write(to: clientPath.appendingPathComponent("config.conf"), atomically:false, encoding: .utf8)
+        #else
             try file.write(to: clientPath.appendingPathComponent("config.conf"), atomically:true, encoding: .utf8)
+        #endif
         } catch {
             print("ERROR: Failed to write server config. \(error)")
             return false
         }
 
         //Generate .visz
+    #if os(Windows)
+        let outPath = self.clientsPath.appendingPathComponent("\(CN).visz")
+        do {
+            try createVisz(at: clientPath, out: outPath)
+        } catch {
+            print("Failed to create client config. \(error)")
+        }
+    #else
         let proc = Process()
+        #if swift(>=5.0)
+        #if os(Linux)
+            proc.executableURL = URL(fileURLWithPath: "/bin/tar")
+        #else
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        #endif
+        #else
         #if os(Linux)
             proc.launchPath = "/bin/tar"
         #else
             proc.launchPath = "/usr/bin/tar"
         #endif
+        #endif
         let pp = Utilities.normalisePath(self.path.path)
         let archive = self.clientsPath.appendingPathComponent("\(CN).visz")
         proc.arguments = ["-czf", archive.path, "-C", pp, CN]
+        #if swift(>=5.0)
+        try? proc.run()
+        #else
         proc.launch()
+        #endif
         proc.waitUntilExit()
-
+    #endif
         //Remove the config folder
         if FileManager.default.fileExists(atPath: clientPath.path) {
             try? FileManager.default.removeItem(at: clientPath)
         }
-
         return true
     }
+
+#if os(Windows)
+    func createVisz(at inputPath: URL, out outputPath: URL) throws {
+        func createEntries(_ inputPath: String, _ verbose: Bool, basePath: String) throws -> [TarEntry] {
+            let inputURL = URL(fileURLWithPath: inputPath)
+            let fileManager = FileManager.default
+
+            let fileAttributes = try fileManager.attributesOfItem(atPath: inputPath)
+
+            // NOTE - This is a massive hack and probably isn't safe
+            // TODO - Make this betterererer
+            let itemloc = inputURL.relativePath
+            let name = itemloc.replacingOccurrences(of: basePath, with: "")
+
+            let entryType: ContainerEntryType
+            if let typeFromAttributes = fileAttributes[.type] as? FileAttributeType {
+                switch typeFromAttributes {
+                case .typeBlockSpecial:
+                    entryType = .blockSpecial
+                case .typeCharacterSpecial:
+                    entryType = .characterSpecial
+                case .typeDirectory:
+                    entryType = .directory
+                case .typeRegular:
+                    entryType = .regular
+                case .typeSocket:
+                    entryType = .socket
+                case .typeSymbolicLink:
+                    entryType = .symbolicLink
+                case .typeUnknown:
+                    entryType = .unknown
+                default:
+                    entryType = .unknown
+                }
+            } else {
+                entryType = .unknown
+            }
+
+            var info = TarEntryInfo(name: name, type: entryType)
+            info.creationTime = fileAttributes[.creationDate] as? Date
+            info.groupID = (fileAttributes[.groupOwnerAccountID] as? NSNumber)?.intValue
+            info.ownerGroupName = fileAttributes[.groupOwnerAccountName] as? String
+            info.modificationTime = fileAttributes[.modificationDate] as? Date
+            info.ownerID = (fileAttributes[.ownerAccountID] as? NSNumber)?.intValue
+            info.ownerUserName = fileAttributes[.ownerAccountName] as? String
+            if let posixPermissions = (fileAttributes[.posixPermissions] as? NSNumber)?.intValue {
+                info.permissions = Permissions(rawValue: UInt32(truncatingIfNeeded: posixPermissions))
+            }
+
+            var entryData = Data()
+            if entryType == .symbolicLink {
+                info.linkName = try fileManager.destinationOfSymbolicLink(atPath: inputPath)
+            } else if entryType != .directory {
+                entryData = try Data(contentsOf: URL(fileURLWithPath: inputPath))
+            }
+
+            if verbose {
+                var log = ""
+                switch entryType {
+                case .regular:
+                    log += "f: "
+                case .directory:
+                    log += "d: "
+                case .symbolicLink:
+                    log += "l:"
+                default:
+                    log += "u: "
+                }
+                log += name
+                if entryType == .symbolicLink {
+                    log += " -> " + info.linkName
+                }
+                print(log)
+            }
+
+            let entry = TarEntry(info: info, data: entryData)
+
+            var entries = [TarEntry]()
+            entries.append(entry)
+
+            if entryType == .directory {
+                for subPath in try fileManager.contentsOfDirectory(atPath: inputPath) {
+                    entries.append(contentsOf: try createEntries(inputURL.appendingPathComponent(subPath).relativePath,
+                                                                    verbose, basePath: basePath))
+                }
+            }
+
+            return entries
+        }
+        // NOTE - This is a massive hack and probably isn't safe
+        // TODO - Make this betterererer
+        var base = Utilities.normalisePath(inputPath.appendingPathComponent("..").relativePath)
+    #if os(Windows)
+        base += "\\"
+    #else
+        base += "/"
+    #endif
+        
+        var fileName = outputPath.lastPathComponent
+        if fileName.hasSuffix(".visz") {
+            fileName.removeLast(5)
+        } else {
+            print("Invalid config name.")
+            return
+        }
+
+        let entries = try createEntries(inputPath.path, false, basePath: base)
+        let containerData = try TarContainer.create(from: entries)
+
+
+        let compressedData = try GzipArchive.archive(data: containerData,
+                                                    fileName: fileName.isEmpty ? nil : fileName,
+                                                    writeHeaderCRC: true)
+        try compressedData.write(to: outputPath)
+        //try containerData.write(to: URL(fileURLWithPath: outputPath))
+
+
+
+    }
+#endif
 
     func generateNewConfig() -> Bool {
         //First up, let's check a config isn't already in place
@@ -503,6 +706,25 @@ class Interactive {
         print("Some fields have a default value in square brackets, simply press Enter to use these values without entering anything.")
         print("Some fields can be left blank if desired. Enter a '.' only for a field to be left blank.")
         print("---")
+
+        if self.keyAlg == .EdDSA {
+            while true {
+                print("IMPORTANT!!!");
+                print("You have selected to use EdDSA. EdDSA support is currently experimental.");
+                print("Please note EdDSA keys and configurations will only work with Viscosity 1.8.2+, and OpenVPN 2.4.7+ & OpenSSL 1.1.1+ on your server.");
+
+                if let input = askQuestion("Continue? [Y/n]:")?.lowercased() {
+                    if input == "y" {
+                        break
+                    } else if input == "n" {
+                        exit(0)
+                    }
+                    print("Invalid input, try again.")
+                } else {
+                    break
+                }
+            }
+        }
 
         guard let address = askQuestion("Server address, e.g. myserver.mydomain.com:", allowedBlank:false) else {
             print("ERROR: Failed to get address from command line")
@@ -727,6 +949,9 @@ class Interactive {
         config["redirect"] = redirectTraffic
         config["keysize"] = self.keySize
         config["validdays"] = self.validDays
+        config["algorithm"] = self.keyAlg.rawValue
+        config["eccurve"] = self.curveName
+        config["suffix"] = self.suffix
 
         self.config = config;
         self.cSubject = cs
