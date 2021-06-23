@@ -3,9 +3,7 @@
 import Foundation
 import SparkLabsCore
 
-#if os(Windows)
 import SWCompression
-#endif
 
 class Interactive {
     var defaultCountry = "AU"
@@ -129,7 +127,7 @@ class Interactive {
         }
         
         //Find and load CA/Key
-        guard let cert = Certificate(withCertificateFile: caPath.path), let key = Key(withFilePath: keyPath.path) else {
+        guard let cert = Certificate(withFileURL: caPath), let key = Key(withFilePath: keyPath.path) else {
             print("ERROR: Failed to load issuing identity.")
             return false
         }
@@ -140,7 +138,8 @@ class Interactive {
     func saveConfig() -> Bool {
         //Update the serial
         self.config["serial"] = self._serial
-        guard let json = Utilities.jsonToString(self.config) else {
+        guard let data = try? JSONSerialization.data(withJSONObject: self.config, options: []),
+        let json = String(data: data, encoding: .utf8) else {
             print("ERROR: Failed to construct config")
             return false
         }
@@ -333,7 +332,7 @@ class Interactive {
             file += "dh none\n";
             file += "# Note this curve probably isn't supported (yet), however OpenVPN will fall back to another (secp384r1)\n";
             file += "ecdh-curve \(self.curveName)\n";
-            file += "tls-cipher TLS_AES_256_GCM_SHA384\n";
+            file += "tls-ciphersuites TLS_AES_256_GCM_SHA384\n";
         } else { // ECDSA
             file += "tls-version-min 1.2\n";
             file += "dh none\n";
@@ -478,15 +477,25 @@ class Interactive {
                 CN = "client1";
             }
         }
-        let clientPath = self.path.appendingPathComponent(CN)
+        var clientPath = self.path.appendingPathComponent(CN)
+        if FileManager.default.fileExists(atPath: clientPath.path) {
+            var i = 0
+            repeat {
+                i += 1
+                clientPath = self.path.appendingPathComponent("\(CN)_\(i)")
+            } while FileManager.default.fileExists(atPath: clientPath.path)
+        }
         do {
-            if FileManager.default.fileExists(atPath: clientPath.path) {
-                try FileManager.default.removeItem(at: clientPath)
-            }
             try FileManager.default.createDirectory(atPath: clientPath.path, withIntermediateDirectories: false, attributes: nil)
         } catch {
-            print("ERROR: Failed to make directory for server configuration. \(error)")
+            print("ERROR: Failed to make directory for client configuration. \(error)")
             return false
+        }
+        defer {
+            //Remove the config folder
+            if FileManager.default.fileExists(atPath: clientPath.path) {
+                try? FileManager.default.removeItem(at: clientPath)
+            }
         }
         if !createNewClientIdentity(name: CN) {
             return false
@@ -536,46 +545,15 @@ class Interactive {
         }
 
         //Generate .visz
-    #if os(Windows)
         let outPath = self.clientsPath.appendingPathComponent("\(CN).visz")
         do {
             try createVisz(at: clientPath, out: outPath)
         } catch {
             print("Failed to create client config. \(error)")
         }
-    #else
-        let proc = Process()
-        #if swift(>=5.0)
-        #if os(Linux)
-            proc.executableURL = URL(fileURLWithPath: "/bin/tar")
-        #else
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        #endif
-        #else
-        #if os(Linux)
-            proc.launchPath = "/bin/tar"
-        #else
-            proc.launchPath = "/usr/bin/tar"
-        #endif
-        #endif
-        let pp = Utilities.normalisePath(self.path.path)
-        let archive = self.clientsPath.appendingPathComponent("\(CN).visz")
-        proc.arguments = ["-czf", archive.path, "-C", pp, CN]
-        #if swift(>=5.0)
-        try? proc.run()
-        #else
-        proc.launch()
-        #endif
-        proc.waitUntilExit()
-    #endif
-        //Remove the config folder
-        if FileManager.default.fileExists(atPath: clientPath.path) {
-            try? FileManager.default.removeItem(at: clientPath)
-        }
         return true
     }
 
-#if os(Windows)
     func createVisz(at inputPath: URL, out outputPath: URL) throws {
         func createEntries(_ inputPath: String, _ verbose: Bool, basePath: String) throws -> [TarEntry] {
             let inputURL = URL(fileURLWithPath: inputPath)
@@ -665,7 +643,7 @@ class Interactive {
         }
         // NOTE - This is a massive hack and probably isn't safe
         // TODO - Make this betterererer
-        var base = Utilities.normalisePath(inputPath.appendingPathComponent("..").relativePath)
+        var base = inputPath.appendingPathComponent("..").relativePath.normalisePath()
     #if os(Windows)
         base += "\\"
     #else
@@ -689,11 +667,7 @@ class Interactive {
                                                     writeHeaderCRC: true)
         try compressedData.write(to: outputPath)
         //try containerData.write(to: URL(fileURLWithPath: outputPath))
-
-
-
     }
-#endif
 
     func generateNewConfig() -> Bool {
         //First up, let's check a config isn't already in place
