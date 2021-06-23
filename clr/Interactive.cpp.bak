@@ -627,7 +627,6 @@ bool Interactive::createVisz(String^ fileName, String ^ folder)
 	TarArchive^ tarArchive = TarArchive::CreateOutputTarArchive(gzoStream);
 
 	String^ rootPath = Directory::GetParent(folder)->ToString();
-	String^ folderName = Path::GetFileName(folder);
 	tarArchive->RootPath = rootPath->Replace('\\', '/');
 	if (tarArchive->RootPath->EndsWith("/")) {
 		tarArchive->RootPath = tarArchive->RootPath->Remove(tarArchive->RootPath->Length);
@@ -639,8 +638,8 @@ bool Interactive::createVisz(String^ fileName, String ^ folder)
 		// We can only have one directory deep in the tar, so set the current directory in case the folder isn't
 		// at the current root, then use the filename as it will be the dir name
 		Directory::SetCurrentDirectory(rootPath);
-		TarEntry^ entry = TarEntry::CreateEntryFromFile(folderName);
-		entry->Name = folderName;
+		TarEntry^ entry = TarEntry::CreateEntryFromFile(fileName);
+		entry->Name = fileName;
 		tarArchive->WriteEntry(entry, true);
 		tarArchive->Close();
 		return true;
