@@ -29,6 +29,7 @@ class Interactive {
     let keyPath:URL
     let crlPath:URL
     let clientsPath:URL
+    let tlscryptv2Path:URL
 
     var keySize:Int
     var validDays:Int
@@ -44,11 +45,15 @@ class Interactive {
     var curveName:String
     var suffix:String
 
+    var tlscryptv2: Bool
+
     let protectedCNs = ["server", "ca"]
 
     var cSubject:CertificateSubject? = nil
     var config:[String:Any] = [:]
     fileprivate var Issuer:Identity? = nil
+    
+    let defaultCurves = ["secp256r1", "secp521r1", "secp384r1"]
 
     init(path:String, keySize:Int = 2048, validDays:Int = 3650) {
         self.path = URL(fileURLWithPath: path)
@@ -58,11 +63,13 @@ class Interactive {
         self.keyPath = self.pkiPath.appendingPathComponent("ca.key")
         self.crlPath = self.pkiPath.appendingPathComponent("crl.crt")
         self.clientsPath = self.path.appendingPathComponent("clients")
+        self.tlscryptv2Path = self.pkiPath.appendingPathComponent("server-tc2.key")
         self.keySize = keySize
         self.validDays = validDays
         self.keyAlg = .RSA
         self.curveName = "secp384r1"
         self.suffix = ""
+        self.tlscryptv2 = false
     }
     fileprivate func askQuestion(_ question:String, allowedBlank:Bool = true) -> String? {
         while true {
@@ -125,6 +132,9 @@ class Interactive {
         if let suffix = self.config["suffix"] as? String {
             self.suffix = suffix
         }
+        if let useTC = self.config["tlscryptv2"] as? Bool {
+            self.tlscryptv2 = useTC
+        }
         
         //Find and load CA/Key
         guard let cert = Certificate(withFileURL: caPath), let key = Key(withFilePath: keyPath.path) else {
@@ -167,20 +177,17 @@ class Interactive {
             return false
         }
         //Save to disk
-        let capath = self.pkiPath.appendingPathComponent(name + ".crt")
+        let certpath = self.pkiPath.appendingPathComponent(name + ".crt")
         let keypath = self.pkiPath.appendingPathComponent(name + ".key")
-        guard let cert = identity.Certificate.CertificateAsPEM else {
-            print("ERROR: Failed to create CA Certificate")
-            return false
-        }
+        let cert = identity.Certificate.certificateAsPEM
         do {
         #if os(Windows)
-            try cert.write(to: capath, atomically:false, encoding: .utf8)
+            try cert.write(to: certpath, atomically:false, encoding: .utf8)
         #else
-            try cert.write(to: capath, atomically:true, encoding: .utf8)
+            try cert.write(to: certpath, atomically:true, encoding: .utf8)
         #endif
         } catch {
-            print("ERROR: Failed to save CA Certificate to \(capath). \(error)")
+            print("ERROR: Failed to save Certificate to \(certpath). \(error)")
         }
         guard let key = identity.Key.KeyAsPEM else {
             print("ERROR: Failed to create CA Key")
@@ -193,7 +200,7 @@ class Interactive {
             try key.write(to: keypath, atomically:true, encoding: .utf8)
         #endif
         } catch {
-            print("ERROR: Failed to save CA Key to \(keypath). \(error)")
+            print("ERROR: Failed to save Key to \(keypath). \(error)")
             return false
         }
         //Le-done
@@ -211,7 +218,28 @@ class Interactive {
         }
         self.Issuer = identity
         //Save to disk
-        return saveIdentity(identity, name: "ca")
+        guard saveIdentity(identity, name: "ca") else {
+            return false
+        }
+        // The TC2 key effectively acts as an issuer, so generate it with the issuer
+        return createNewTC2ServerKey()
+    }
+    func createNewTC2ServerKey() -> Bool {
+        do {
+            guard let serverkey = try Key.CreateTlsCryptV2ServerKey() else {
+                print("ERROR: Failed to generate tls-crypt-v2 server key")
+                return false
+            }
+        #if os(Windows)
+            try serverkey.write(to: self.tlscryptv2Path, atomically:false, encoding: .utf8)
+        #else
+            try serverkey.write(to: self.tlscryptv2Path, atomically:true, encoding: .utf8)
+        #endif
+        } catch {
+            print("ERROR: Failed to save tls-crypt-v2 server key to \(self.tlscryptv2Path.path). \(error)")
+            return false
+        }
+        return true
     }
     func createDH() -> Bool {
         print("Creating DH Params. This will take a while...")
@@ -274,6 +302,7 @@ class Interactive {
         let certName = "server\(self.suffix).crt"
         let keyName = "server\(self.suffix).key"
         let dhName = "dh\(self.suffix).pem"
+        let tc2Name = "server-tc2\(self.suffix).key"
         let certpath = self.pkiPath.appendingPathComponent("server.crt")
         let keypath = self.pkiPath.appendingPathComponent("server.key")
         let dhPath = self.pkiPath.appendingPathComponent("dh.pem")
@@ -312,8 +341,8 @@ class Interactive {
             return false
         }
         //Form the config
-        var file = "#-- Config Auto Generated by SparkLabs OpenVPN Certificate Generator --#\n"
-        file +=    "#--                   Config for OpenVPN 2.4 Server                  --#\n\n"
+        var file = "#-- Config Auto Generated by SparkLabs OpenVPN Configuration Generator --#\n"
+        file +=    "#--                   Config for OpenVPN 2.5 Server                    --#\n\n"
         file += "proto \(proto)\n"
         file += "ifconfig-pool-persist ipp\(self.suffix).txt\n"
         file += "keepalive 10 120\n"
@@ -322,25 +351,48 @@ class Interactive {
         file += "status openvpn-status\(self.suffix).log\n"
         file += "verb 3\n"
         file += "mute 10\n"
-        file += "ca \(caName)\ncert \(certName)\nkey \(keyName)\n"
+        file += "ca \"\(caName)\"\ncert \"\(certName)\"\nkey \"\(keyName)\"\n"
         if FileManager.default.fileExists(atPath: self.crlPath.path) {
-            file += "crl-verify \(crlName)\n"
+            file += "crl-verify \"\(crlName)\"\n"
+        }
+        if self.tlscryptv2 {
+            file += "tls-crypt-v2 \"\(tc2Name)\"\n"
         }
         if self.keyAlg == .RSA {
             file += "dh \(dhName)\n"
         } else if self.keyAlg == .EdDSA {
             file += "dh none\n";
-            file += "# Note this curve probably isn't supported (yet), however OpenVPN will fall back to another (secp384r1)\n";
-            file += "ecdh-curve \(self.curveName)\n";
-            file += "tls-ciphersuites TLS_AES_256_GCM_SHA384\n";
+            if !["ED25519", "ED448"].contains(self.curveName) {
+                file += "tls-groups \(self.curveName):X25519:X448\n"
+            } else {
+                if self.curveName == "ED25519" {
+                    file += "tls-groups X25519:X448\n"
+                } else {
+                    file += "tls-groups X448:X25519\n"
+                }
+            }
         } else { // ECDSA
-            file += "tls-version-min 1.2\n";
             file += "dh none\n";
-            file += "ecdh-curve \(self.curveName)\n";
-            file += "tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384\n";
+            if !defaultCurves.contains(self.curveName) {
+                file += "tls-groups \(self.curveName):secp256r1:secp521r1:secp384r1\n"
+            } else {
+                file += "tls-groups \(curveName)"
+                for curve in defaultCurves {
+                    if curve != self.curveName {
+                        file += ":\(curve)"
+                    }
+                }
+                file += "\n"
+            }
         }
+        file += "tls-version-min 1.2\n"
+        file += "data-ciphers AES-256-GCM:AES-256-CBC\n"
+        file += "cipher AES-256-GCM\n"
+        file += "auth SHA256\n"
+        file += "remote-cert-tls client\n"
         file += "port \(port)\n"
         file += "dev tun0\n"
+        file += "topology subnet\n"
         file += "server 10.8.0.0 255.255.255.0\n"
         if let dns = config["dns"] as? [String] {
             for ss in dns { //TODO - validate ipv4/ipv6 for DNS6?
@@ -378,37 +430,45 @@ class Interactive {
         }
         //Copy files
         do {
-            try Utilities.copyItem(at: self.caPath, to: serverPath.appendingPathComponent(caName))
+			try FileManager.default.copyItem(at:self.caPath, to:serverPath.appendingPathComponent(caName))
         } catch {
             print("ERROR: Failed to copy CA. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: certpath, to: serverPath.appendingPathComponent(certName))
+			try FileManager.default.copyItem(at:certpath, to:serverPath.appendingPathComponent(certName))
         } catch {
             print("ERROR: Failed to copy Cert. \(error)")
             return false
         }
         do {
             if self.keyAlg == .RSA {
-                try Utilities.copyItem(at: dhPath, to: serverPath.appendingPathComponent(dhName))
+			    try FileManager.default.copyItem(at:dhPath, to:serverPath.appendingPathComponent(dhName))
             }
         } catch {
             print("ERROR: Failed to copy DH. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: keypath, to: serverPath.appendingPathComponent(keyName))
+			try FileManager.default.copyItem(at:keypath, to:serverPath.appendingPathComponent(keyName))
         } catch {
             print("ERROR: Failed to copy key. \(error)")
             return false
         }
         do {
             if FileManager.default.fileExists(atPath: self.crlPath.path) {
-                try Utilities.copyItem(at: self.crlPath, to: serverPath.appendingPathComponent(crlName))
+			    try FileManager.default.copyItem(at:self.crlPath, to:serverPath.appendingPathComponent(crlName))
             }
         } catch {
             print("ERROR: Failed to copy CRL. \(error)")
+            return false
+        }
+        do {
+            if self.tlscryptv2 {
+			    try FileManager.default.copyItem(at:self.tlscryptv2Path, to:serverPath.appendingPathComponent(tc2Name))
+            }
+        } catch {
+            print("ERROR: Failed to copy tls-crypt-v2. \(error)")
             return false
         }
         print("Successfully generated server configuration at \(serverPath.path).")
@@ -429,7 +489,58 @@ class Interactive {
             print("ERROR: Failed to create client identity")
             return false
         }
-        return saveIdentity(identity, name:name)
+        guard saveIdentity(identity, name:name) else {
+            print("ERROR: Failed to write new client PKI to disk")
+            return false
+        }
+        if !self.tlscryptv2 {
+            return true
+        }
+        func deleteID() {
+            // Delete PKI for this user if we need to
+            let certpath = self.pkiPath.appendingPathComponent(name + ".crt")
+            let keypath = self.pkiPath.appendingPathComponent(name + ".key")
+            do {
+                try FileManager.default.removeItem(at: certpath)
+            } catch {
+                print("ERROR: Failed to remove revoked PKI data. \(error)")
+            }
+            do {
+                try FileManager.default.removeItem(at: keypath)
+            } catch {
+                print("ERROR: Failed to remove revoked PKI data. \(error)")
+            }
+        }
+        // Create client tlscrypt
+        let servertc2: String
+        do {
+            servertc2 = try String(contentsOf: self.tlscryptv2Path) 
+        } catch {
+            print("ERROR: Failed to read tls-crypt-v2 server key from \(self.tlscryptv2Path.path). \(error)")
+            deleteID()
+            return false
+        }
+        let clienttc2Path = self.pkiPath.appendingPathComponent(name + "-tc2.key")
+        do {
+            // Create client key
+            guard let clientKey = try Key.CreateTlsCryptV2ClientKey(serverKey: servertc2) else {
+                print("ERROR: Failed to generate client tls-crypt-v2 key")
+                deleteID()
+                return false
+            }
+            // Write client key
+            #if os(Windows)
+                try clientKey.write(to: clienttc2Path, atomically:false, encoding: .utf8)
+            #else
+                try clientKey.write(to: clienttc2Path, atomically:true, encoding: .utf8)
+            #endif
+        } catch {
+            print("ERROR: Failed to generate client tls-crypt-v2 key. \(error)")
+            deleteID()
+            return false
+        }
+        return true
+
     }
     func createNewClientConfig(name:String? = nil) -> Bool {
         //Confirm we have everything
@@ -501,36 +612,56 @@ class Interactive {
             return false
         }
         //Copy files
-        let certpath = self.pkiPath.appendingPathComponent("\(CN).crt")
-        let keypath = self.pkiPath.appendingPathComponent("\(CN).key")
+        let certName = "\(CN).crt"
+        let certpath = self.pkiPath.appendingPathComponent(certName)
+        let keyName = "\(CN).key"
+        let keypath = self.pkiPath.appendingPathComponent(keyName)
+        let tc2Name = "\(CN)-tc2.key"
+        let tc2Path = self.pkiPath.appendingPathComponent(tc2Name)
         do {
-            try Utilities.copyItem(at: self.caPath, to: clientPath.appendingPathComponent("ca.crt"))
+			try FileManager.default.copyItem(at:self.caPath, to:clientPath.appendingPathComponent("ca.crt"))
         } catch {
             print("ERROR: Failed to copy CA. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: certpath, to: clientPath.appendingPathComponent("\(CN).crt"))
+			try FileManager.default.copyItem(at:certpath, to:clientPath.appendingPathComponent(certName))
         } catch {
             print("ERROR: Failed to copy Cert. \(error)")
             return false
         }
         do {
-            try Utilities.copyItem(at: keypath, to: clientPath.appendingPathComponent("\(CN).key"))
+			try FileManager.default.copyItem(at:keypath, to:clientPath.appendingPathComponent(keyName))
         } catch {
             print("ERROR: Failed to copy Key. \(error)")
             return false
         }
+        do {
+            if self.tlscryptv2 {
+			    try FileManager.default.copyItem(at:tc2Path, to:clientPath.appendingPathComponent(tc2Name))
+            }
+        } catch {
+            print("ERROR: Failed to copy CA. \(error)")
+            return false
+        }
 
         //Create config
-        var file = "#-- Config Auto Generated By SparkLabs OpenVPN Certificate Generator--#\n\n"
+        var file = "#-- Config Auto Generated By SparkLabs OpenVPN Configuration Generator--#\n\n"
         file += "#viscosity name \(CN)@\(address)\n"
         file += "remote \(address) \(port) \(proto)\n"
         file += "dev tun\ntls-client\n"
         //Certs
-        file += "ca ca.crt\n"
-        file += "cert \(CN).crt\n"
-        file += "key \(CN).key\n"
+        file += "ca \"ca.crt\"\n"
+        file += "cert \"\(certName)\"\n"
+        file += "key \"\(keyName)\"\n"
+        if self.tlscryptv2 {
+            file += "tls-crypt-v2 \"\(tc2Name)\"\n"
+        }
+        file += "tls-version-min 1.2\n"
+        file += "data-ciphers AES-256-GCM:AES-256-CBC\n"
+        file += "cipher AES-256-GCM\n"
+        file += "auth SHA256\n"
+        file += "remote-cert-tls server\n"
         file += "persist-tun\npersist-key\nnobind\npull\n"
         //Write config
         do {
@@ -564,7 +695,9 @@ class Interactive {
             // NOTE - This is a massive hack and probably isn't safe
             // TODO - Make this betterererer
             let itemloc = inputURL.relativePath
-            let name = itemloc.replacingOccurrences(of: basePath, with: "")
+            var name = itemloc.replacingOccurrences(of: basePath, with: "")
+            let slashset = CharacterSet(charactersIn: "/\\")
+            name = name.trimmingCharacters(in: slashset)
 
             let entryType: ContainerEntryType
             if let typeFromAttributes = fileAttributes[.type] as? FileAttributeType {
@@ -641,15 +774,7 @@ class Interactive {
 
             return entries
         }
-        // NOTE - This is a massive hack and probably isn't safe
-        // TODO - Make this betterererer
-        var base = inputPath.appendingPathComponent("..").relativePath.normalisePath()
-    #if os(Windows)
-        base += "\\"
-    #else
-        base += "/"
-    #endif
-        
+        let base = inputPath.appendingPathComponent("..").relativePath.normalisePath()
         var fileName = outputPath.lastPathComponent
         if fileName.hasSuffix(".visz") {
             fileName.removeLast(5)
@@ -684,9 +809,27 @@ class Interactive {
         if self.keyAlg == .EdDSA {
             while true {
                 print("IMPORTANT!!!");
-                print("You have selected to use EdDSA. EdDSA support is currently experimental.");
-                print("Please note EdDSA keys and configurations will only work with Viscosity 1.8.2+, and OpenVPN 2.4.7+ & OpenSSL 1.1.1+ on your server.");
+                print("You have selected to use EdDSA. EdDSA support is currently experimental and requires the latest versions of OpenVPN, OpenSSL and Viscosity.");
 
+                if let input = askQuestion("Continue? [Y/n]:")?.lowercased() {
+                    if input == "y" {
+                        break
+                    } else if input == "n" {
+                        exit(0)
+                    }
+                    print("Invalid input, try again.")
+                } else {
+                    break
+                }
+            }
+        } else if self.keyAlg == .ECDSA {
+            while true {
+                if !defaultCurves.contains(self.curveName) {
+                    print("IMPORTANT!!!");
+                    print("You have selected a curve OpenVPN may not support.")
+                } else {
+                    break
+                }
                 if let input = askQuestion("Continue? [Y/n]:")?.lowercased() {
                     if input == "y" {
                         break
@@ -811,7 +954,7 @@ class Interactive {
                     var valid = true
                     for v in vals {
                         let val = v.trim()
-                        if IPAddress.isValidIP(val, family: .AnyFamily) {
+                        if IPAddress(ipAddress: val) != nil {
                             finalVal.append(val)
                         } else {
                             print("\(v) is not a valid IP Address.")
@@ -823,6 +966,22 @@ class Interactive {
                         break
                     }
                 }
+            }
+        }
+
+        while true {
+            if let input = askQuestion("Would you like to use tls-crypt-v2 with this configuration? [Y/n]:")?.lowercased() {
+                if input == "y" {
+                    self.tlscryptv2 = true
+                    break
+                } else if input == "n" {
+                    self.tlscryptv2 = false
+                    break
+                }
+                print("Invalid input, try again.")
+            } else {
+                self.tlscryptv2 = true
+                break
             }
         }
 
@@ -919,6 +1078,7 @@ class Interactive {
         config["proto"] = proto
         config["port"] = port
         config["dns"] = dns
+        config["tlscryptv2"] = self.tlscryptv2
         config["server"] = address
         config["redirect"] = redirectTraffic
         config["keysize"] = self.keySize
@@ -962,7 +1122,7 @@ class Interactive {
         // FInd the certificate
         let certname = "\(CN).crt"
         let certpath = self.pkiPath.appendingPathComponent(certname)
-        guard let clientcert = Certificate(withCertificateFile: certpath.path) else {
+        guard let clientcert = Certificate(withFileURL: certpath) else {
             print("ERROR: Failed to load certificate")
             return false
         }

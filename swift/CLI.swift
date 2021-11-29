@@ -43,7 +43,7 @@ class CLI {
         print("\(exename) Tool")
         print("Using \(Utilities.OpenSSLVersion())")
         print()
-	    print("Copyright SparkLabs Pty Ltd 2019");
+	    print("Copyright SparkLabs Pty Ltd 2021");
 	    print("Licensed under Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0)");
 	    print("Portions of the code included in or with this tool may contain, or may be derived from, third-party code, including without limitation, open source software. All use of third-party software is subject to and governed by the respective licenses for the third-party software. These licenses are available at https://github.com/thesparklabs/openvpn-configuration-generator/blob/master/LICENSE");
     }
