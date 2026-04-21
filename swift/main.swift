@@ -1,4 +1,4 @@
-// Copyright SparkLabs Pty Ltd 2018
+// Copyright SparkLabs Pty Ltd 2026
 
 import Foundation
 import SparkLabsCore
@@ -19,7 +19,6 @@ if (mode == .unknown) {
     exit(1)
 }
 if mode == .ShowCurves {
-    Utilities.initOpenSSL()
     CLI.showCurves()
     exit(0)
 }
@@ -31,8 +30,12 @@ if mode == .About {
     CLI.printAbout()
     exit(0)
 }
+if mode == .Version {
+    CLI.printVersion()
+    exit(0)
+}
 
-//Parse args
+// Parse args
 var op = 2
 var options:[OptionType:String] = [:]
 while op < argc {
@@ -49,26 +52,23 @@ while op < argc {
     }
 }
 
-//Check valid path
-let path:String
+// Check valid path
+let path: URL
 if let pp = options[.path] {
-    path = pp
+    path = URL(fileURLWithPath: pp, isDirectory: true)
 } else {
-    //Get CWD
-    path = FileManager.default.currentDirectoryPath
+    // Get CWD
+    path = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 }
 
-//Determine the path exists and is a dir
-if !Utilities.dirExists(path) {
-    print("Path \(path) not found.")
+// Determine the path exists and is a dir
+if !path.isDirectoryAndExists {
+    print("Path \(path.path) not found.")
     exit(1)
 }
 
-//Init OpenSSL
-Utilities.initOpenSSL()
-
 if mode == .InitSetup {
-    let interactive = Interactive(path:path)
+    let interactive = Interactive(path: path)
     if let kSize = options[.keysize] {
         if let int = Int(kSize) {
             interactive.keySize = int
@@ -97,11 +97,16 @@ if mode == .InitSetup {
     }
     if let curve = options[.curve] {
         interactive.curveName = curve
-    } else if interactive.keyAlg == .EdDSA {
+    } else if interactive.keyAlg == .eddsa {
         interactive.curveName = "ED25519"
     }
     if let suffix = options[.suffix] {
         interactive.suffix = suffix
+    }
+    if let serverSAN = options[.serverSAN] {
+        if !interactive.setServerSANsFromOption(serverSAN) {
+            exit(1)
+        }
     }
 
     if !interactive.generateNewConfig() {
@@ -112,7 +117,7 @@ if mode == .InitSetup {
     guard interactive.createNewIssuer() else {
         exit(1)
     }
-    if interactive.keyAlg == .RSA {
+    if interactive.keyAlg == .rsa {
         guard interactive.createDH() else {
             exit(1)
         }
@@ -126,7 +131,7 @@ if mode == .InitSetup {
     print("Successfully initialised config.")
     exit(0)
 } else if mode == .CreateClient {
-    let interactive = Interactive(path:path)
+    let interactive = Interactive(path: path)
     guard interactive.loadConfig() else {
         exit(1)
     }
@@ -139,7 +144,7 @@ if mode == .InitSetup {
     print("Successfully created new client")
     exit(0)
 } else if mode == .Revoke {
-    let interactive = Interactive(path:path)
+    let interactive = Interactive(path: path)
     guard interactive.loadConfig() else {
         exit(1)
     }
