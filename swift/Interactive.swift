@@ -545,11 +545,13 @@ class Interactive {
         data-ciphers \(self.modernDataCiphers)
         auth SHA256
         remote-cert-tls client
+        auth-gen-token 86400 3600
         port \(port)
         dev tun0
         topology subnet
         server 10.8.0.0 255.255.255.0
         """
+        file += "\n"
         file += pushedDNSDirectives(dnsEntries)
         if redirectTraffic {
             file += "push \"redirect-gateway def1\"\n"
