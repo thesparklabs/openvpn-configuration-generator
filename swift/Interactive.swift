@@ -548,6 +548,7 @@ class Interactive {
         auth-gen-token 86400 3600
         port \(port)
         dev tun0
+        tun-mtu 1420
         topology subnet
         server 10.8.0.0 255.255.255.0
         """
