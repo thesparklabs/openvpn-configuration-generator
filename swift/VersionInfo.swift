@@ -1,4 +1,4 @@
 enum VersionInfo {
-    static let shortVersion = "2.0.3"
-    static let displayVersion = "2.0.3 (1004)"
+    static let shortVersion = "2.0.4"
+    static let displayVersion = "2.0.4 (1005)"
 }

@@ -18,9 +18,9 @@ Download the Windows installer for the [latest release](https://github.com/thesp
 
 ### Linux
 
-**Debian/Ubuntu**: Download the .deb package for the [latest release](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest) for your machine's architecture (x86_64/arm64). If using a GUI, simply double click the .deb file to start the installer. If using the command line use a command like `sudo dpkg -i ovpngen-2.0.3-linux-x86_64.deb`.
+**Debian/Ubuntu**: Download the .deb package for the [latest release](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest) for your machine's architecture (x86_64/arm64). If using a GUI, simply double click the .deb file to start the installer. If using the command line use a command like `sudo dpkg -i ovpngen-2.0.4-linux-x86_64.deb`.
 
-**RedHat/Fedora**: Download the .rpm package for the [latest release](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest) for your machine's architecture (x86_64/arm64). If using a GUI, simply double click the .rpm file to start the installer. If using the command line use a command like `sudo dnf install ./ovpngen-2.0.3-linux-x86_64.rpm`.
+**RedHat/Fedora**: Download the .rpm package for the [latest release](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest) for your machine's architecture (x86_64/arm64). If using a GUI, simply double click the .rpm file to start the installer. If using the command line use a command like `sudo dnf install ./ovpngen-2.0.4-linux-x86_64.rpm`.
 
 **Other**: Download the portable Linux generic binary archive file for the [latest release](https://github.com/thesparklabs/openvpn-configuration-generator/releases/latest) for your machine's architecture (x86_64/arm64) and decompress it. You can then run it directly using `./ovpngen`. Virtually all Linux distributions are supported (including those above). 
 
